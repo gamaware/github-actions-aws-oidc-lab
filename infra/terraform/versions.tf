@@ -14,8 +14,10 @@ terraform {
 provider "aws" {
   region = var.aws_region
 
+  # IAM treats tag keys as case-insensitive, so the default Purpose is dropped
+  # when var.tags sets purpose in any case; both would fail every IAM create.
   default_tags {
-    tags = merge({ Purpose = "personal-lab" }, var.tags, {
+    tags = merge(contains([for key in keys(var.tags) : lower(key)], "purpose") ? {} : { Purpose = "personal-lab" }, var.tags, {
       Project   = var.name
       ManagedBy = "terraform"
     })
