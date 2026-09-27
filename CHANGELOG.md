@@ -7,6 +7,16 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- AWS-native path in `examples/codepipeline/`: a CodePipeline V2 (Source through CodeConnections or S3, CodeBuild
+  test, Trivy gate and push by digest, manual approval, ECS deploy action, CodeBuild verify), buildspecs, a pipeline
+  KMS key for artifacts and build logs, an artifact bucket with a lifecycle rule and a TLS-only policy, and separate
+  pipeline, build and verify roles ([ADR 0010](docs/adr/0010-github-actions-vs-codepipeline.md)).
+- Offline tests for it: `examples/codepipeline/terraform/tests/codepipeline.tftest.hcl` (stages, approval before
+  deploy, encryption, no wildcard actions) and `tests/test_codepipeline_example.py` (buildspec properties), both in
+  `make verify`; Checkov in `security.yml` scans the new root.
+- `make test-live-codepipeline` (manual): applies the deploy target and the pipeline to a sandbox account, runs the
+  pipeline end to end with an S3 source, checks the roles with the IAM policy simulator, always destroys.
+- CodePipeline flow diagram (`docs/diagrams/codepipeline-flow.drawio` and `.png`).
 - GitLab CI equivalent in `examples/gitlab-ci/`: a pipeline with the same build-once, scan, deploy-by-digest and
   verify stages, and a Terraform root for the GitLab OIDC provider and a deploy role that reuses the GitHub deploy
   policy ([ADR 0009](docs/adr/0009-gitlab-ci-example.md)).

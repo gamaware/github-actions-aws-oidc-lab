@@ -90,6 +90,12 @@ them. It destroys both stacks on exit, even after a failure, and fails if anythi
 remains. It shows the caller identity and asks for confirmation before creating anything. Its output is never
 committed.
 
+`make test-live-codepipeline` covers the CodePipeline path the same way: it applies `infra/terraform` (one task, a
+public IP, no inbound rule) and `examples/codepipeline/terraform` with an S3 source, uploads `git archive HEAD`,
+runs the pipeline, approves it, waits for Deploy and Verify, checks the pipeline, build and verify roles with the
+IAM policy simulator, then deregisters the revisions the pipeline registered and destroys both stacks. It takes about
+15 minutes and builds only committed files.
+
 ## Variants
 
 The same pattern (one OIDC provider, one role per deploy target, a subject pinned to a repository and environment)
@@ -101,4 +107,7 @@ works for other targets:
   `cloudfront:CreateInvalidation` on one distribution.
 - **GitLab CI:** implemented and tested in [examples/gitlab-ci](../examples/gitlab-ci/README.md)
   ([ADR 0009](adr/0009-gitlab-ci-example.md)).
+- **AWS CodePipeline and CodeBuild:** implemented and tested in
+  [examples/codepipeline](../examples/codepipeline/README.md)
+  ([ADR 0010](adr/0010-github-actions-vs-codepipeline.md)).
 - **Jenkins:** a documented pattern in [jenkins-pattern.md](jenkins-pattern.md).

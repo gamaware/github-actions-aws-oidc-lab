@@ -1,7 +1,8 @@
 # GitHub Actions to AWS with OIDC, a least-privilege role and security gates
 
 Deploy a container to Amazon ECS on Fargate from CI with no stored AWS keys, a role that reaches one service, and
-gates that stop an unscanned image. GitHub Actions end to end, with the same deploy on GitLab CI as a tested example.
+gates that stop an unscanned image. GitHub Actions end to end, with the same deploy on GitLab CI and on AWS
+CodePipeline with CodeBuild as tested examples.
 
 [![ci](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/ci.yml)
 [![security](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/security.yml/badge.svg)](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/security.yml)
@@ -24,6 +25,9 @@ gates that stop an unscanned image. GitHub Actions end to end, with the same dep
   can request an `id-token` except the optional read-only plan.
 - **The same pattern on GitLab CI.** `examples/gitlab-ci/` deploys the same image to the same service through
   GitLab's OIDC tokens, with its own tests. Jenkins is covered as a documented pattern.
+- **The same deploy with AWS-native tools.** `examples/codepipeline/` runs CodeBuild (tests, Trivy gate, push by
+  digest), a manual approval and the ECS deploy action in CodePipeline, with one scoped role per principal and
+  encrypted artifacts that expire. Offline tests assert the stage order and every role's actions.
 
 ## Inspect the deliverable
 
@@ -35,6 +39,8 @@ gates that stop an unscanned image. GitHub Actions end to end, with the same dep
 | [iam.tftest.hcl](infra/terraform/tests/iam.tftest.hcl) | Offline assertions on both policies, wildcards refused |
 | [verify-deployment.sh](scripts/verify-deployment.sh) | The post-deploy check that catches a circuit-breaker rollback |
 | [examples/gitlab-ci](examples/gitlab-ci/README.md) | The GitLab CI pipeline, its role and tests |
+| [examples/codepipeline](examples/codepipeline/README.md) | CodePipeline, CodeBuild buildspecs, three roles and tests |
+| [codepipeline.tftest.hcl](examples/codepipeline/terraform/tests/codepipeline.tftest.hcl) | Approval before deploy, encryption, no wildcard actions |
 | [threat-notes.md](docs/threat-notes.md) | Each token subject and whether STS accepts it |
 | [deploy-runbook.md](docs/deploy-runbook.md) | Deploying the lab to a sandbox account, cost and teardown |
 
@@ -55,6 +61,8 @@ The work is done when:
    than the optional read-only plan asks for an `id-token`.
 5. The deployed digest equals the scanned digest, and a rollback fails the run.
 6. `make verify` passes offline in under a minute.
+7. The same deploy through AWS CodePipeline keeps the same gates: tests and Trivy before the push, a manual approval
+   before the ECS deploy, deploy by digest, and roles with every action named; `terraform test` asserts it offline.
 
 ## Architecture
 
@@ -68,6 +76,20 @@ the rollout. GitHub Actions is the implemented path; GitLab CI (dashed) is the t
 The deployment view shows the seven steps of `deploy.yml`, the approval gate and the pull request path that STS
 refuses: [docs/diagrams/deploy-flow.png](docs/diagrams/deploy-flow.png). Diagram sources are the `.drawio` files next
 to the images.
+
+### AWS-native alternative: CodePipeline and CodeBuild
+
+![CodePipeline flow: CodeBuild tests, scans and pushes by digest, a manual approval, the ECS deploy action and a verify stage](docs/diagrams/codepipeline-flow.png)
+
+For clients whose delivery runs inside AWS, `examples/codepipeline/` deploys the same image to the same service with
+AWS CodePipeline. The source is a GitHub repository through AWS CodeConnections (or a zip in the artifact bucket).
+A CodeBuild project runs the tests, builds the image, stops on fixable HIGH or CRITICAL Trivy findings and pushes it,
+then exports the image as `repository@sha256:<digest>`. A manual approval shows that digest, the ECS deploy action
+rolls it out, and a second CodeBuild project runs the same `verify-deployment.sh`. The pipeline, build and verify
+roles are separate: only the pipeline can deploy, only the build can push. Artifacts and build logs are encrypted
+with a pipeline KMS key, and the artifact bucket expires them after 30 days. When to choose each tool is in
+[ADR 0010](docs/adr/0010-github-actions-vs-codepipeline.md); setup is in
+[examples/codepipeline/README.md](examples/codepipeline/README.md).
 
 ## Verify locally
 
@@ -84,18 +106,20 @@ Expected output ends with:
 ```text
 Success! 7 passed, 0 failed.
 Success! 7 passed, 0 failed.
+Success! 7 passed, 0 failed.
 ...
 No findings to report. Good job! (8 suppressed)
 make verify: all checks passed
 ```
 
-It takes about 25 seconds once tools and providers are cached. It runs pytest (45 tests), ruff, `terraform fmt`,
-`validate`, mocked `terraform test` and tflint on both Terraform roots, Checkov, shellcheck, shellharden, hadolint,
+It takes about 30 seconds once tools and providers are cached. It runs pytest (52 tests), ruff, `terraform fmt`,
+`validate`, mocked `terraform test` and tflint on the three Terraform roots, Checkov, shellcheck, shellharden, hadolint,
 actionlint and zizmor. `make image` adds the Trivy image gate (needs Docker) and `make semgrep` the Semgrep rulesets.
 
-`make test-live` is optional and manual. It applies both Terraform roots to a sandbox account, checks the roles with
-the IAM policy simulator and always destroys what it created; see
-[deploy-runbook.md](docs/deploy-runbook.md#automated-live-check). To deploy the lab end to end from your own fork,
+`make test-live` is optional and manual. It applies the GitHub and GitLab Terraform roots to a sandbox account, checks
+the roles with the IAM policy simulator and always destroys what it created; see
+[deploy-runbook.md](docs/deploy-runbook.md#automated-live-check). `make test-live-codepipeline` does the same for the
+CodePipeline path and also runs the pipeline end to end, approval included. To deploy the lab end to end from your own fork,
 follow the same runbook.
 
 ## Repository map
@@ -106,12 +130,14 @@ infra/terraform/           OIDC provider, deploy role, optional read-only plan r
 infra/terraform/policies/  trust and permission policies as JSON templates
 infra/terraform/tests/     terraform test with a mocked provider
 examples/gitlab-ci/        .gitlab-ci.yml and a Terraform root for the GitLab OIDC role, with tests
-tests/                     pytest: workflow hardening rules and GitLab pipeline properties
-scripts/                   verify-deployment.sh (both pipelines), test-live.sh (manual, real AWS)
+examples/codepipeline/     buildspecs and a Terraform root for CodePipeline, CodeBuild and their roles, with tests
+tests/                     pytest: workflow hardening rules, GitLab pipeline and buildspec properties
+scripts/                   verify-deployment.sh (every pipeline), test-live.sh and test-live-codepipeline.sh
+                           (manual, real AWS)
 .github/workflows/         ci (make verify + shared checks), security (SARIF gates), deploy, plan, scorecard,
                            update-pre-commit-hooks
 docs/adr/                  architecture decision records
-docs/diagrams/             context and deployment diagrams (.drawio source, .png export)
+docs/diagrams/             context, deployment and CodePipeline diagrams (.drawio source, .png export)
 docs/                      threat notes, deploy runbook, Jenkins pattern
 ```
 
@@ -128,6 +154,7 @@ docs/                      threat notes, deploy runbook, Jenkins pattern
 | [0007](docs/adr/0007-read-only-plan-role.md) | A separate, optional, read-only role for terraform plan on pull requests | Accepted |
 | [0008](docs/adr/0008-offline-policy-tests.md) | Test IAM policies offline with terraform test and a mocked provider | Accepted |
 | [0009](docs/adr/0009-gitlab-ci-example.md) | Show the GitLab CI equivalent as a tested example, bound to the protected branch | Accepted |
+| [0010](docs/adr/0010-github-actions-vs-codepipeline.md) | GitHub Actions vs CodePipeline: when to use each | Accepted |
 
 ## Security and quality gates
 
@@ -155,6 +182,9 @@ The required check names and the branch protection command are in [CONTRIBUTING.
 - **The GitLab pipeline is not run here.** Its tests prove what the files say. GitLab's subject names the branch,
   not the environment, and on the free tier `when: manual` is a click, not an approval
   ([ADR 0009](docs/adr/0009-gitlab-ci-example.md)).
+- **The CodePipeline path runs only in `make test-live-codepipeline`.** It has no provenance or SBOM attestation,
+  its build project runs Docker in privileged mode, and the GitHub connection needs one console handshake
+  ([ADR 0010](docs/adr/0010-github-actions-vs-codepipeline.md)).
 - **Jenkins is covered by a documented pattern** ([docs/jenkins-pattern.md](docs/jenkins-pattern.md)), with no
   pipeline code or tests.
 - **Some controls live in GitHub settings:** the `production` environment's reviewer and branch policy, and branch
