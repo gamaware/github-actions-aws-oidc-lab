@@ -7,6 +7,8 @@
 #   make test-live-codepipeline               # uses the AWS CLI profile "dev"
 #   AWS_PROFILE_LIVE=sandbox make test-live-codepipeline
 #   TEST_LIVE_CONFIRM=yes skips the confirmation prompt after the identity check.
+#   TEST_LIVE_EXTRA_TAGS="Owner=you,Team=platform" adds tags that an SCP may
+#   require on every create.
 #
 # What it does:
 #   1. prints the caller identity so the operator can confirm the account;
@@ -185,7 +187,15 @@ for root in "$TARGET_ROOT" "$PIPELINE_ROOT"; do
 done
 
 export AWS_PROFILE="$PROFILE" AWS_REGION="$REGION"
-tags="{\"$TAG_KEY\"=\"$TAG_VALUE\"}"
+tags="{\"$TAG_KEY\"=\"$TAG_VALUE\""
+if [[ -n "${TEST_LIVE_EXTRA_TAGS:-}" ]]; then
+  IFS=, read -r -a extra_tags <<<"$TEST_LIVE_EXTRA_TAGS"
+  for pair in "${extra_tags[@]}"; do
+    [[ "$pair" == ?*=* ]] || { echo "::error::TEST_LIVE_EXTRA_TAGS takes key=value pairs, got '$pair'."; exit 1; }
+    tags+=",\"${pair%%=*}\"=\"${pair#*=}\""
+  done
+fi
+tags+="}"
 
 target_vars=(
   -var "name=$NAME" -var "aws_region=$REGION"
