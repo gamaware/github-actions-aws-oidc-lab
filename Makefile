@@ -1,10 +1,10 @@
-# Every target except test-live runs offline: no AWS account, no credentials.
+# Every target except the test-live targets runs offline: no AWS account, no credentials.
 # CI runs `make verify`, so a green local run means a green verify job.
 
 UVX       ?= uvx
 TERRAFORM ?= terraform
 TFLINT    ?= tflint
-TF_ROOTS  := infra/terraform examples/gitlab-ci/terraform
+TF_ROOTS  := infra/terraform examples/gitlab-ci/terraform examples/codepipeline/terraform
 SHELL_FILES := $(wildcard scripts/*.sh .claude/hooks/*.sh)
 
 PYTEST    := $(UVX) --with-requirements app/requirements-dev.txt pytest
@@ -14,7 +14,7 @@ SEMGREP   := $(UVX) semgrep==1.178.0
 ACTIONLINT := $(UVX) --from actionlint-py==1.7.12.25 actionlint
 ZIZMOR    := $(UVX) zizmor==1.30.1
 
-.PHONY: verify test python terraform checkov shell dockerfile workflows image semgrep test-live clean
+.PHONY: verify test python terraform checkov shell dockerfile workflows image semgrep test-live test-live-codepipeline clean
 
 ## verify: everything CI runs in the verify job, offline
 verify: test python terraform checkov shell dockerfile workflows
@@ -28,7 +28,7 @@ python:
 	$(RUFF) check .
 	$(RUFF) format --check .
 
-## terraform: fmt, validate, mocked terraform test and tflint on both roots
+## terraform: fmt, validate, mocked terraform test and tflint on every root
 terraform:
 	$(TERRAFORM) fmt -check -recursive
 	@for root in $(TF_ROOTS); do \
@@ -71,6 +71,12 @@ semgrep:
 ## Manual only. Needs the AWS CLI profile `dev` (override with AWS_PROFILE_LIVE).
 test-live:
 	./scripts/test-live.sh
+
+## test-live-codepipeline: apply the deploy target and the CodePipeline stack to the dev account,
+## run the pipeline end to end (build, approve, deploy, verify), check its roles, destroy.
+## Manual only. Needs the AWS CLI profile `dev` (override with AWS_PROFILE_LIVE).
+test-live-codepipeline:
+	./scripts/test-live-codepipeline.sh
 
 clean:
 	rm -rf .pytest_cache .ruff_cache
