@@ -31,7 +31,7 @@ in effect, what any deployed image can do.
 
 ## Compliance
 
-Automated, in `infra/tests/iam.tftest.hcl` (`deploy_permissions_have_no_wildcard_actions_and_few_wildcard_resources`):
+Automated, in `infra/terraform/tests/iam.tftest.hcl` (`deploy_permissions_have_no_wildcard_actions_and_few_wildcard_resources`):
 
 - `iam:PassRole` is the only IAM action in the deploy policy.
 - Its resource is exactly the execution role ARN and its `iam:PassedToService` condition is

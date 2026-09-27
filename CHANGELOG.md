@@ -10,16 +10,16 @@ the project uses [Semantic Versioning](https://semver.org/).
 - The lab: a GitHub OIDC provider, a deploy role scoped to one ECR repository and one ECS service, a Fargate
   service, pull request CI with no cloud access, and threat notes.
 - Security gates as required checks with SARIF in code scanning: Semgrep on code, Trivy on the image, Checkov on
-  `infra/` ([ADR 0006](docs/adr/0006-security-gates.md)).
+  `infra/terraform/` ([ADR 0006](docs/adr/0006-security-gates.md)).
 - Build once and deploy by digest: the image is built once as an OCI archive, scanned, attested (build provenance
   and SBOM), pushed with its digest preserved, and deployed as `image@sha256:<digest>`
   ([ADR 0005](docs/adr/0005-build-once-deploy-by-digest.md)).
 - Post-deploy verification (`scripts/verify-deployment.sh`): the new revision is PRIMARY, its rollout completed, and
   its tasks are healthy on the expected digest.
 - Offline IAM tests with `terraform test` and a mocked provider ([ADR 0008](docs/adr/0008-offline-policy-tests.md)).
-- Optional read-only plan role and `plan` workflow for pull requests that change `infra/`, with an S3 backend
+- Optional read-only plan role and `plan` workflow for pull requests that change `infra/terraform/`, with an S3 backend
   example ([ADR 0007](docs/adr/0007-read-only-plan-role.md)).
-- tflint and `terraform test` in CI; Terraform pinned in `infra/.terraform-version`.
+- tflint and `terraform test` in CI; Terraform pinned in `infra/terraform/.terraform-version`.
 - OpenSSF Scorecard workflow.
 - ADRs, CODEOWNERS, SECURITY.md, CONTRIBUTING.md, a pull request template and this changelog.
 

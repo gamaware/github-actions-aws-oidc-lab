@@ -37,7 +37,7 @@ read-only plan role ([ADR 0007](0007-read-only-plan-role.md)) is a second, separ
 
 ## Compliance
 
-Automated, in `infra/tests/iam.tftest.hcl`:
+Automated, in `infra/terraform/tests/iam.tftest.hcl`:
 
 - No deploy action contains `*`.
 - The statements that use Resource `*` are exactly `EcrLogin`, `EcsReadTaskDefinitions` and

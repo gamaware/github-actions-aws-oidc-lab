@@ -22,8 +22,8 @@ image is built once, scanned, attested and deployed by digest, and the rollout i
 | Claim | Evidence in this repository |
 | --- | --- |
 | No long-lived AWS credentials anywhere | No AWS secrets; the deploy job uses `id-token: write` and `configure-aws-credentials` with a role ARN variable |
-| The role trusts exactly one subject and one audience | `infra/policies/trust-policy.json.tftpl`; asserted by `infra/tests/iam.tftest.hcl` ([ADR 0001](docs/adr/0001-exact-subject-matching.md), [ADR 0002](docs/adr/0002-environment-subject-only.md)) |
-| The role can touch one repository and one service | `infra/policies/deploy-policy.json.tftpl`; no wildcard actions, Resource `*` only in three named statements, PassRole only for the execution role, all asserted in tests ([ADR 0004](docs/adr/0004-one-role-per-deploy-target.md)) |
+| The role trusts exactly one subject and one audience | `infra/terraform/policies/trust-policy.json.tftpl`; asserted by `infra/terraform/tests/iam.tftest.hcl` ([ADR 0001](docs/adr/0001-exact-subject-matching.md), [ADR 0002](docs/adr/0002-environment-subject-only.md)) |
+| The role can touch one repository and one service | `infra/terraform/policies/deploy-policy.json.tftpl`; no wildcard actions, Resource `*` only in three named statements, PassRole only for the execution role, all asserted in tests ([ADR 0004](docs/adr/0004-one-role-per-deploy-target.md)) |
 | Pull requests cannot deploy | `ci.yml`, `lint.yml` and `security.yml` have no `id-token: write`; the deploy role refuses the `pull_request` subject |
 | What ships is what was scanned | `deploy.yml` builds once, gates with Trivy, attests provenance and an SBOM, pushes with the digest preserved, deploys `image@sha256` ([ADR 0005](docs/adr/0005-build-once-deploy-by-digest.md)) |
 | A rollback cannot pass as success | `scripts/verify-deployment.sh` checks the PRIMARY revision, rollout state, task health and image digest |
@@ -37,7 +37,7 @@ flowchart LR
     subgraph GH["GitHub"]
         direction TB
         PRW["Pull request workflows<br/>ci, lint, security<br/>no id-token"]
-        PLAN["plan workflow (optional)<br/>infra/ changes only"]
+        PLAN["plan workflow (optional)<br/>infra/terraform/ changes only"]
         BUILD["deploy.yml: build job<br/>build once, Trivy, SBOM"]
         DEPLOY["deploy.yml: deploy job<br/>environment: production<br/>required reviewer"]
         ISSUER["OIDC token issuer<br/>token.actions.githubusercontent.com"]
@@ -101,10 +101,10 @@ flowchart LR
 
 ```text
 app/                    tiny HTTP service (Python standard library), Dockerfile, unit tests
-infra/                  Terraform: OIDC provider, deploy role, optional plan role, ECR, ECS cluster and service
-infra/policies/         trust and permission policies as JSON templates, readable on their own
-infra/tests/            terraform test with a mocked AWS provider: trust, permissions, validations
-infra/backend.*.example S3 backend with a native lock file
+infra/terraform/                  Terraform: OIDC provider, deploy role, optional plan role, ECR, ECS cluster and service
+infra/terraform/policies/         trust and permission policies as JSON templates, readable on their own
+infra/terraform/tests/            terraform test with a mocked AWS provider: trust, permissions, validations
+infra/terraform/backend.*.example S3 backend with a native lock file
 scripts/                verify-deployment.sh, used by deploy.yml and runnable from a laptop
 .github/workflows/      ci (tests, hadolint, shellcheck), lint (actionlint, zizmor, terraform, tflint),
                         security (Semgrep, Trivy, Checkov), plan (optional read-only plan),
@@ -115,14 +115,14 @@ docs/threat-notes.md    what the trust conditions block, case by case
 
 ## How to run it
 
-Prerequisites: Terraform 1.9 or later (CI pins the version in `infra/.terraform-version`), AWS credentials for a
-sandbox account with IAM admin rights (only for this one-time setup), a VPC with subnets that can reach ECR, and a
+Prerequisites: Terraform 1.9 or later (CI pins the version in `infra/terraform/.terraform-version`), AWS
+credentials for a sandbox account with IAM admin rights (only for this one-time setup), a VPC with subnets that can reach ECR, and a
 copy of this repository under your own account.
 
 1. **Create the infrastructure once.**
 
    ```bash
-   cd infra
+   cd infra/terraform
    cp terraform.tfvars.example terraform.tfvars   # set github_owner, github_repo, vpc_id, subnet_ids
    # Optional remote state: cp backend.tf.example backend.tf; cp backend.hcl.example backend.hcl; edit it
    terraform init              # or: terraform init -backend-config=backend.hcl
@@ -154,14 +154,14 @@ copy of this repository under your own account.
 6. **Optional: read-only plan on pull requests.** Use the S3 backend, set `create_plan_role = true` and
    `state_bucket`, apply, then add the variables `AWS_PLAN_ROLE_ARN` (`terraform output -raw plan_role_arn`),
    `TF_STATE_BUCKET`, and `TF_VARS_JSON` (your `terraform.tfvars` values as one JSON object). Pull requests that
-   change `infra/` then show the plan in the job summary ([ADR 0007](docs/adr/0007-read-only-plan-role.md)).
+   change `infra/terraform/` then show the plan in the job summary ([ADR 0007](docs/adr/0007-read-only-plan-role.md)).
 
 ### Run the checks locally
 
 ```bash
 uvx --with-requirements app/requirements-dev.txt pytest -q
 docker build -t oidc-lab app && trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 oidc-lab
-(cd infra && terraform init -backend=false && terraform test)
+(cd infra/terraform && terraform init -backend=false && terraform test)
 pre-commit run --all-files
 ```
 

@@ -18,7 +18,7 @@ The `security` workflow runs three jobs on every pull request, on every push to 
 | --- | --- | --- | --- |
 | `Semgrep (code)` | Semgrep, rulesets `p/python`, `p/dockerfile`, `p/github-actions`, `p/terraform`, `p/secrets` | whole repository | any finding |
 | `Trivy (image)` | Trivy | the built image | HIGH or CRITICAL with a released fix (`ignore-unfixed`) |
-| `Checkov (infra)` | Checkov | `infra/` | any failed check without an inline skip |
+| `Checkov (infra)` | Checkov | `infra/terraform/` | any failed check without an inline skip |
 
 Each job uploads SARIF to GitHub code scanning with its own category, even when the gate fails. The three check
 names are required status checks on `main`, next to `Unit tests`, `actionlint and zizmor` and
@@ -32,7 +32,7 @@ explicitly instead of `--config auto`, so the rules do not depend on detection a
 - Trivy gates only on fixable findings. An unfixed CVE in the base image does not block every merge; a Dependabot
   digest bump brings the fix, and the weekly run reports new CVEs in an unchanged image. The first version failed
   on HIGH findings in pip's vendored packages; the runtime image now removes pip, which the app does not use.
-- Every Checkov skip must sit next to the resource with its reason (see the KMS key policy in `infra/main.tf`).
+- Every Checkov skip must sit next to the resource with its reason (see the KMS key policy in `infra/terraform/main.tf`).
 - Fork pull requests get a read-only token, so their SARIF upload is skipped by GitHub. The gates still run and
   still block.
 - Registry rulesets can gain rules between runs. A new Semgrep finding can fail a pull request that did not change

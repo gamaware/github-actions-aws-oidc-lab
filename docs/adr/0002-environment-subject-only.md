@@ -43,7 +43,7 @@ before it issues a token with that subject.
 
 ## Compliance
 
-Automated: `deploy_trust_accepts_exactly_the_production_environment` in `infra/tests/iam.tftest.hcl` asserts the
+Automated: `deploy_trust_accepts_exactly_the_production_environment` in `infra/terraform/tests/iam.tftest.hcl` asserts the
 subject list equals `["repo:example-owner/example-repo:environment:production"]`, so adding the branch subject
 back fails the `lint` workflow.
 

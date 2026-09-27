@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-A reviewer of a pull request that changes `infra/` should see what `terraform plan` would do against the real
+A reviewer of a pull request that changes `infra/terraform/` should see what `terraform plan` would do against the real
 account. That needs AWS credentials in a pull request workflow, which the first version avoided entirely: no
 pull request job had `id-token: write`.
 
@@ -22,8 +22,8 @@ job's credentials can do, the author can do, for example with an `external` data
   roles and OIDC provider, the ECR repository, the ECS cluster and service, the KMS key, the log group, and a few
   describe calls that have no resource-level permissions. No `s3:PutObject`, so the plan runs with `-lock=false`.
 - The `plan` workflow runs only for pull requests from this repository (fork pull requests get no OIDC token),
-  only when `infra/` changes, and only when the `AWS_PLAN_ROLE_ARN` variable is set. It writes the plan to the job
-  summary, not to a pull request comment, so it needs no `pull-requests: write`.
+  only when `infra/terraform/` changes, and only when the `AWS_PLAN_ROLE_ARN` variable is set. It writes the plan
+  to the job summary, not to a pull request comment, so it needs no `pull-requests: write`.
 - Applies stay out of CI and run from a workstation with the state lock.
 
 ## Consequences
@@ -41,7 +41,7 @@ job's credentials can do, the author can do, for example with an `external` data
 
 ## Compliance
 
-Automated, in `infra/tests/iam.tftest.hcl`:
+Automated, in `infra/terraform/tests/iam.tftest.hcl`:
 
 - `plan_role_trusts_only_pull_requests_and_can_only_read` asserts `StringEquals` only, `aud` `sts.amazonaws.com`,
   the subject list exactly `["repo:example-owner/example-repo:pull_request"]`, no wildcards in the trust policy,
@@ -51,4 +51,4 @@ Automated, in `infra/tests/iam.tftest.hcl`:
 
 ## Notes
 
-- Backend example: `infra/backend.tf.example` and `infra/backend.hcl.example`.
+- Backend example: `infra/terraform/backend.tf.example` and `infra/terraform/backend.hcl.example`.

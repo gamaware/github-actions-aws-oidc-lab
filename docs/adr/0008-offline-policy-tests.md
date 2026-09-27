@@ -21,7 +21,7 @@ Test the rendered policies, not the Terraform code, with `terraform test` and `m
 - Assertions state security properties: exactly these subjects, this audience, only `StringEquals`, no wildcard
   actions, Resource `*` only in named statements, `iam:PassRole` only for the execution role, the plan role
   read-only and off by default, and variable validations that refuse wildcards.
-- The tests run in the `lint` workflow and locally with `terraform test` in `infra/`, with no AWS credentials.
+- The tests run in the `lint` workflow and locally with `terraform test` in `infra/terraform/`, with no AWS credentials.
 
 ## Consequences
 

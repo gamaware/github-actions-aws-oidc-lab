@@ -1,5 +1,5 @@
 # Optional read-only role for `terraform plan` on pull requests that change
-# infra/. It trusts only the pull_request subject of this repository and can
+# infra/terraform/. It trusts only the pull_request subject of this repository and can
 # read this stack's resources and state object, nothing else (docs/adr/0007).
 locals {
   plan_subjects = ["repo:${local.github_repository}:pull_request"]

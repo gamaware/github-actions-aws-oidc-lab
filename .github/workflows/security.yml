@@ -3,7 +3,7 @@ name: security
 # The three security gates, each a required status check on main:
 #   Semgrep (code)   static analysis of the Python app, Dockerfile, workflows and Terraform
 #   Trivy (image)    fixable HIGH and CRITICAL vulnerabilities in the built image
-#   Checkov (infra)  misconfigurations in infra/
+#   Checkov (infra)  misconfigurations in infra/terraform/
 # Each job uploads SARIF to code scanning, even when the gate fails, so the
 # findings show up in the Security tab and on the pull request. None of them
 # touch AWS. See docs/adr/0006-security-gates.md.
@@ -110,11 +110,11 @@ jobs:
         with:
           enable-cache: false
 
-      # Skips live next to the resource with their reason (infra/main.tf).
+      # Skips live next to the resource with their reason (infra/terraform/main.tf).
       - name: Checkov scan
         run: >-
           uvx checkov==3.3.19
-          --directory infra
+          --directory infra/terraform
           --framework terraform
           --quiet --compact
           --output cli --output sarif

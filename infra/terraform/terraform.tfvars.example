@@ -11,6 +11,6 @@ subnet_ids = ["subnet-YOUR_SUBNET_ID_A", "subnet-YOUR_SUBNET_ID_B"]
 # Set to false if the account already has the GitHub OIDC provider.
 # create_oidc_provider = false
 
-# Read-only plan role for pull requests that change infra/ (docs/adr/0007).
+# Read-only plan role for pull requests that change infra/terraform/ (docs/adr/0007).
 # create_plan_role = true
 # state_bucket     = "YOUR_STATE_BUCKET"

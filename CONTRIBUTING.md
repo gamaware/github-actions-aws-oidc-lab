@@ -15,9 +15,9 @@ This is a personal lab, but issues and pull requests are welcome.
 uvx --with-requirements app/requirements-dev.txt pytest -q
 docker build -t oidc-lab app
 trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 oidc-lab
-(cd infra && terraform init -backend=false && terraform validate && terraform test)
-(cd infra && tflint --init --config .tflint.hcl && tflint --config .tflint.hcl)
-uvx checkov==3.3.19 --directory infra --framework terraform --quiet --compact
+(cd infra/terraform && terraform init -backend=false && terraform validate && terraform test)
+(cd infra/terraform && tflint --init --config .tflint.hcl && tflint --config .tflint.hcl)
+uvx checkov==3.3.19 --directory infra/terraform --framework terraform --quiet --compact
 uvx semgrep==1.178.0 scan --metrics=off --error \
   --config p/python --config p/dockerfile --config p/github-actions --config p/terraform --config p/secrets
 pre-commit run --all-files
@@ -27,8 +27,8 @@ None of these need AWS credentials. `terraform test` uses a mocked provider.
 
 ## Rules for changes
 
-- **Trust and permission policies.** Any change to `infra/policies/` or `infra/iam.tf` needs a matching assertion
-  in `infra/tests/iam.tftest.hcl`. A change to a recorded decision needs a new ADR in `docs/adr/`.
+- **Trust and permission policies.** Any change to `infra/terraform/policies/` or `infra/terraform/iam.tf` needs a
+  matching assertion in `infra/terraform/tests/iam.tftest.hcl`. A change to a recorded decision needs a new ADR in `docs/adr/`.
 - **Workflows.** Start from `permissions: {}` and grant per job. Pin every action to a full commit SHA with the
   version in a comment. Pass event data to scripts through `env`, not inline expressions. No
   `pull_request_target`. `actionlint` and `zizmor` must pass.

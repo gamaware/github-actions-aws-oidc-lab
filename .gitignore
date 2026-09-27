@@ -28,3 +28,6 @@ __pycache__/
 *.sarif
 sbom.*.json
 .DS_Store
+.claude-flow/
+.claude/settings.local.json
+build/

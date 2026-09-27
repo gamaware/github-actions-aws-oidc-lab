@@ -1,8 +1,8 @@
 name: plan
 
-# Read-only terraform plan for pull requests that change infra/. It is off
-# until the repository variable AWS_PLAN_ROLE_ARN is set (create_plan_role =
-# true in Terraform). The plan role trusts only this repository's
+# Read-only terraform plan for pull requests that change infra/terraform/.
+# It is off until the repository variable AWS_PLAN_ROLE_ARN is set
+# (create_plan_role = true in Terraform). The plan role trusts only this repository's
 # pull_request subject and can read, not change, this stack and its state
 # object. Fork pull requests get no id-token, so the job is skipped for them.
 # See docs/adr/0007-read-only-plan-role.md.
@@ -29,7 +29,7 @@ jobs:
       id-token: write
     defaults:
       run:
-        working-directory: infra
+        working-directory: infra/terraform
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}

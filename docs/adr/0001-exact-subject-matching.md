@@ -29,14 +29,14 @@ at plan time instead of widening the trust policy.
 ## Consequences
 
 - A new repository, branch or environment that needs to deploy must be added to the list on purpose, in a pull
-  request that changes `infra/iam.tf`. That is the intended friction.
+  request that changes `infra/terraform/iam.tf`. That is the intended friction.
 - The trust policy is easy to read and to test: there is nothing to expand.
 - Reusing one role for many repositories is not possible without listing each one. The lab uses one role per
   deploy target instead ([ADR 0004](0004-one-role-per-deploy-target.md)).
 
 ## Compliance
 
-Automated, in `terraform test` (`infra/tests/iam.tftest.hcl`, run by the `lint` workflow on every pull request):
+Automated, in `terraform test` (`infra/terraform/tests/iam.tftest.hcl`, run by the `lint` workflow on every pull request):
 
 - `deploy_trust_accepts_exactly_the_production_environment` asserts the only condition operator is
   `StringEquals`, the only keys are `aud` and `sub`, `aud` is `sts.amazonaws.com`, the subject list is exactly

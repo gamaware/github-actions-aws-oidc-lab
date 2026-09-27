@@ -43,13 +43,13 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: infra
+        working-directory: infra/terraform
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # infra/.terraform-version is the single place the version is pinned.
+      # infra/terraform/.terraform-version is the single place the version is pinned.
       - name: Read the pinned Terraform version
         id: tf
         run: echo "version=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"

@@ -22,7 +22,7 @@ updates:
       default-days: 7
 
   - package-ecosystem: terraform
-    directory: /infra
+    directory: /infra/terraform
     schedule:
       interval: weekly
     cooldown:

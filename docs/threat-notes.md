@@ -1,7 +1,8 @@
 # Threat notes: what the trust conditions block
 
-The deploy role's trust policy ([infra/policies/trust-policy.json.tftpl](../infra/policies/trust-policy.json.tftpl))
-has two conditions, both `StringEquals`, so no wildcards:
+The deploy role's trust policy
+([infra/terraform/policies/trust-policy.json.tftpl](../infra/terraform/policies/trust-policy.json.tftpl)) has two
+conditions, both `StringEquals`, so no wildcards:
 
 | Claim | Required value |
 | --- | --- |

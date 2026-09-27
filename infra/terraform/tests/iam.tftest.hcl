@@ -1,7 +1,7 @@
 # Offline tests for the IAM trust and permission policies. The AWS provider is
 # mocked, so no credentials are needed and nothing is created. The policies are
 # rendered from templates in Terraform itself, so their JSON is real even
-# though every AWS resource is fake. Run with `terraform test` in infra/.
+# though every AWS resource is fake. Run with `terraform test` in infra/terraform/.
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
