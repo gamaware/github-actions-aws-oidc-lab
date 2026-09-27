@@ -1,26 +1,34 @@
-# GitHub Actions to AWS with OIDC and a least-privilege role
+# GitHub Actions to AWS with OIDC, a least-privilege role and security gates
+
+[![ci](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/ci.yml)
+[![lint](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/lint.yml/badge.svg)](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/lint.yml)
+[![security](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/security.yml/badge.svg)](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/security.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/gamaware/github-actions-aws-oidc-lab/badge)](https://securityscorecards.dev/viewer/?uri=github.com/gamaware/github-actions-aws-oidc-lab)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > **Personal lab / demonstration. Not client code.**
 
 AWS access keys stored as CI secrets live for a long time and rarely get rotated. This lab deploys a small container
-service to Amazon ECS on Fargate from GitHub Actions with **no stored AWS keys**. The deploy job gets a short-lived
-OIDC token from GitHub and exchanges it for temporary credentials on an IAM role that trusts only this repository's
-`main` branch and its `production` environment. That role can push to one ECR repository and update one ECS service,
-nothing else. Pull requests build and test with no AWS access at all.
+service to Amazon ECS on Fargate from GitHub Actions with **no stored AWS keys**. The deploy job exchanges a
+short-lived GitHub OIDC token for temporary credentials on an IAM role that trusts only this repository's
+`production` environment. That role can push to one ECR repository and update one ECS service, nothing else. The
+image is built once, scanned, attested and deployed by digest, and the rollout is verified before the run passes.
 
-## What it demonstrates
+**Decisions:** [docs/adr/](docs/adr/README.md) · **Threat notes:** [docs/threat-notes.md](docs/threat-notes.md) ·
+**Changes:** [CHANGELOG.md](CHANGELOG.md)
 
-- **GitHub OIDC federation to AWS.** An IAM OIDC identity provider for `token.actions.githubusercontent.com` and a role
-  assumed with `sts:AssumeRoleWithWebIdentity`. Credentials last one hour at most and are never stored.
-- **A trust policy scoped to one repository.** The audience must be `sts.amazonaws.com` and the subject must be
-  exactly `repo:OWNER/REPO:environment:production` or `repo:OWNER/REPO:ref:refs/heads/main`. Forks, other branches,
-  pull requests and other repositories are refused by STS.
-- **A permission policy scoped to one ECR repository and one ECS service.** `iam:PassRole` is limited to the task
-  execution role and only when passed to ECS tasks.
-- **Pull requests with no cloud access.** The PR workflow runs with `permissions: contents: read`, so it cannot even
-  request an OIDC token.
-- **Supply-chain hygiene.** Every action is pinned to a commit SHA, the base image is pinned by digest, the container
-  runs as a non-root user on a read-only root filesystem, and workflows pass `actionlint` and `zizmor`.
+## What this proves
+
+| Claim | Evidence in this repository |
+| --- | --- |
+| No long-lived AWS credentials anywhere | No AWS secrets; the deploy job uses `id-token: write` and `configure-aws-credentials` with a role ARN variable |
+| The role trusts exactly one subject and one audience | `infra/policies/trust-policy.json.tftpl`; asserted by `infra/tests/iam.tftest.hcl` ([ADR 0001](docs/adr/0001-exact-subject-matching.md), [ADR 0002](docs/adr/0002-environment-subject-only.md)) |
+| The role can touch one repository and one service | `infra/policies/deploy-policy.json.tftpl`; no wildcard actions, Resource `*` only in three named statements, PassRole only for the execution role, all asserted in tests ([ADR 0004](docs/adr/0004-one-role-per-deploy-target.md)) |
+| Pull requests cannot deploy | `ci.yml`, `lint.yml` and `security.yml` have no `id-token: write`; the deploy role refuses the `pull_request` subject |
+| What ships is what was scanned | `deploy.yml` builds once, gates with Trivy, attests provenance and an SBOM, pushes with the digest preserved, deploys `image@sha256` ([ADR 0005](docs/adr/0005-build-once-deploy-by-digest.md)) |
+| A rollback cannot pass as success | `scripts/verify-deployment.sh` checks the PRIMARY revision, rollout state, task health and image digest |
+| Code, image and infrastructure are gated | Semgrep, Trivy and Checkov as required checks with SARIF in code scanning ([ADR 0006](docs/adr/0006-security-gates.md)) |
+| The workflows themselves are hardened | `permissions: {}` at the top, per-job grants, SHA-pinned actions, no `pull_request_target`, `actionlint` and `zizmor` in CI, OpenSSF Scorecard |
 
 ## Architecture
 
@@ -28,78 +36,103 @@ nothing else. Pull requests build and test with no AWS access at all.
 flowchart LR
     subgraph GH["GitHub"]
         direction TB
-        PR["pull_request workflow<br/>test, hadolint, build, Trivy<br/><i>no cloud access</i>"]
-        MAIN["push to main workflow<br/>environment: production<br/><i>required reviewer</i>"]
-        SECRETS["Repository secrets<br/><b>no stored AWS keys</b>"]
-        ISSUER["GitHub OIDC token issuer<br/>token.actions.githubusercontent.com"]
+        PRW["Pull request workflows<br/>ci, lint, security<br/>no id-token"]
+        PLAN["plan workflow (optional)<br/>infra/ changes only"]
+        BUILD["deploy.yml: build job<br/>build once, Trivy, SBOM"]
+        DEPLOY["deploy.yml: deploy job<br/>environment: production<br/>required reviewer"]
+        ISSUER["OIDC token issuer<br/>token.actions.githubusercontent.com"]
+        ATTEST[("Attestation store<br/>provenance and SBOM")]
+        SCAN[("Code scanning<br/>SARIF")]
     end
 
     subgraph AWS["AWS account"]
         direction TB
         STS["AWS STS"]
-        ROLE["IAM role: OWNER/REPO deploy<br/>trust: aud = sts.amazonaws.com<br/>sub = this repo, production environment"]
-        ECR[("ECR repository<br/>one repository")]
-        ECS["ECS service on Fargate<br/>one service"]
+        ROLE["Deploy role<br/>sub = environment:production<br/>aud = sts.amazonaws.com"]
+        PROLE["Plan role (optional)<br/>sub = pull_request<br/>read-only"]
+        ECR[("ECR repository<br/>immutable tags")]
+        ECS["ECS service on Fargate<br/>circuit breaker, rollback"]
     end
 
-    MAIN -- "1. request ID token" --> ISSUER
-    ISSUER -- "2. signed JWT" --> MAIN
-    MAIN -- "3. AssumeRoleWithWebIdentity" --> STS
-    STS -- "4. checks trust policy" --> ROLE
-    ROLE -. "push image" .-> ECR
-    ROLE -. "register task definition, update service" .-> ECS
-    PR ~~~ SECRETS
+    PRW -- "uploads findings" --> SCAN
+    BUILD -- "signs attestations" --> ATTEST
+    BUILD -- "OCI archive + digest" --> DEPLOY
+    DEPLOY -- "1. requests token" --> ISSUER
+    ISSUER -- "2. signed JWT" --> DEPLOY
+    DEPLOY -- "3. AssumeRoleWithWebIdentity" --> STS
+    STS -- "4. evaluates trust policy" --> ROLE
+    DEPLOY -- "5. verifies attestation" --> ATTEST
+    ROLE -. "push by digest" .-> ECR
+    ROLE -. "register revision, update, verify" .-> ECS
+    PLAN -- "AssumeRoleWithWebIdentity" --> STS
+    STS -- "evaluates trust policy" --> PROLE
+    PROLE -. "describe, get, list" .-> ECS
 
-    classDef nokeys fill:#fff5f5,stroke:#c53030,color:#742a2a;
-    class SECRETS nokeys;
+    classDef gate fill:#fffbea,stroke:#b7791f,color:#744210;
+    classDef optional stroke-dasharray: 4 3;
+    class DEPLOY gate;
+    class PLAN,PROLE optional;
 ```
+
+| Key | Meaning |
+| --- | --- |
+| Solid arrow | A call or hand-off made by the job at the tail, labelled with what it sends |
+| Dotted arrow | What a role's permission policy allows once assumed |
+| Cylinder | A store: registry, attestations or scan results |
+| Yellow box | A job that waits for the required reviewer |
+| Dashed border | Optional; exists only with `create_plan_role = true` |
 
 ### Token flow, step by step
 
-1. A push to `main` starts `deploy.yml`. The job declares `environment: production`, so it waits for the required
-   reviewer before any step runs.
-2. The job has `id-token: write`, so `aws-actions/configure-aws-credentials` can ask GitHub's OIDC issuer for a signed
-   JWT. Its claims include `aud: sts.amazonaws.com` and `sub: repo:OWNER/REPO:environment:production`.
-3. The action calls `sts:AssumeRoleWithWebIdentity` with that token and the role ARN from the `AWS_ROLE_ARN`
-   repository variable. The ARN is not a secret.
-4. STS validates the signature against the OIDC provider registered in the account, then evaluates the role's trust
-   policy. Any other audience or subject is denied.
-5. STS returns credentials that expire in one hour. The job logs in to ECR, pushes the image tagged with the commit
-   SHA and run attempt, renders a new task definition revision and updates the service, then waits until the service
-   is stable.
-
-What the trust conditions block, and why, is in [docs/threat-notes.md](docs/threat-notes.md).
+1. A push to `main` starts `deploy.yml`. The `build` job builds the image once into an OCI archive, fails on fixable
+   HIGH or CRITICAL findings, and signs a build-provenance attestation and an SBOM attestation for the manifest
+   digest. It has `id-token: write` only for signing; the deploy role refuses its `ref` subject.
+2. The `deploy` job declares `environment: production`, so it waits for the required reviewer. It then asks
+   GitHub's OIDC issuer for a JWT with `aud: sts.amazonaws.com` and `sub: repo:OWNER/REPO:environment:production`.
+3. `aws-actions/configure-aws-credentials` calls `sts:AssumeRoleWithWebIdentity` with that token and the role ARN
+   from the `AWS_ROLE_ARN` repository variable. The ARN is not a secret.
+4. STS validates the signature against the OIDC provider in the account and evaluates the trust policy. Any other
+   audience or subject is denied. The credentials expire in one hour.
+5. The job pushes the archive with `skopeo copy --preserve-digests`, checks that the registry digest matches the
+   built one, and verifies the attestation. It deploys a task definition revision with `image@sha256:<digest>`,
+   waits for a stable service, then runs `scripts/verify-deployment.sh` so a circuit-breaker rollback fails the run.
 
 ## Repository layout
 
 ```text
-app/                  tiny HTTP service (Python standard library), Dockerfile, unit tests
-infra/                Terraform: OIDC provider, deploy role, ECR repository, ECS cluster, service, task definition
-infra/policies/       trust-policy.json.tftpl and deploy-policy.json.tftpl, readable on their own
-.github/workflows/    ci.yml (pull request: test, hadolint, build, Trivy image scan)
-                      deploy.yml (main: build, push, render task definition, deploy, wait for a stable service)
-                      lint.yml (actionlint, zizmor, terraform fmt and validate, checkov)
-docs/threat-notes.md  what the trust conditions block: forks, other branches, other repositories
+app/                    tiny HTTP service (Python standard library), Dockerfile, unit tests
+infra/                  Terraform: OIDC provider, deploy role, optional plan role, ECR, ECS cluster and service
+infra/policies/         trust and permission policies as JSON templates, readable on their own
+infra/tests/            terraform test with a mocked AWS provider: trust, permissions, validations
+infra/backend.*.example S3 backend with a native lock file
+scripts/                verify-deployment.sh, used by deploy.yml and runnable from a laptop
+.github/workflows/      ci (tests, hadolint, shellcheck), lint (actionlint, zizmor, terraform, tflint),
+                        security (Semgrep, Trivy, Checkov), plan (optional read-only plan),
+                        deploy (build once, deploy by digest, verify), scorecard (OpenSSF)
+docs/adr/               architecture decision records
+docs/threat-notes.md    what the trust conditions block, case by case
 ```
 
 ## How to run it
 
-Prerequisites: Terraform 1.6 or later, AWS credentials for a sandbox account with IAM admin rights (only for this
-one-time setup), a VPC with subnets that can reach ECR, and a copy of this repository under your own account.
+Prerequisites: Terraform 1.9 or later (CI pins the version in `infra/.terraform-version`), AWS credentials for a
+sandbox account with IAM admin rights (only for this one-time setup), a VPC with subnets that can reach ECR, and a
+copy of this repository under your own account.
 
 1. **Create the infrastructure once.**
 
    ```bash
    cd infra
    cp terraform.tfvars.example terraform.tfvars   # set github_owner, github_repo, vpc_id, subnet_ids
-   terraform init
+   # Optional remote state: cp backend.tf.example backend.tf; cp backend.hcl.example backend.hcl; edit it
+   terraform init              # or: terraform init -backend-config=backend.hcl
    terraform apply
    ```
 
    If the account already has the GitHub OIDC provider, set `create_oidc_provider = false`.
 
 2. **Create the `production` environment** in the repository settings. Add a required reviewer and limit deployment
-   branches to `main`.
+   branches to `main`. Both settings are part of the trust model ([ADR 0002](docs/adr/0002-environment-subject-only.md)).
 
 3. **Add repository variables** (Settings, Secrets and variables, Actions, Variables). None of them is a secret:
 
@@ -107,32 +140,46 @@ one-time setup), a VPC with subnets that can reach ECR, and a copy of this repos
    | --- | --- |
    | `AWS_ROLE_ARN` | `terraform output -raw deploy_role_arn` |
    | `AWS_REGION` | the region you used, for example `us-east-1` |
-   | `ECR_REPOSITORY` | `terraform output -raw ecr_repository` |
+   | `ECR_REPOSITORY_URL` | `terraform output -raw ecr_repository_url` |
    | `ECS_CLUSTER` | `terraform output -raw ecs_cluster` |
    | `ECS_SERVICE` | `terraform output -raw ecs_service` |
    | `ECS_TASK_FAMILY` | `terraform output -raw task_definition_family` |
+   | `APP_URL` (optional) | base URL that reaches the service, for the HTTP part of the verification |
 
-4. **Push to `main`.** Approve the deployment, then watch the job assume the role, push the image and roll the service.
-   The service starts with `desired_count = 0`; set it to `1` and apply again once the first image exists.
+4. **Turn on the required checks** listed in [CONTRIBUTING.md](CONTRIBUTING.md) with the `gh api` command there.
 
-Run the checks locally:
+5. **Push to `main`.** Approve the deployment, then watch the build, push, deploy and verification steps. The
+   service starts with `desired_count = 0`; set it to `1` and apply again once the first image exists.
+
+6. **Optional: read-only plan on pull requests.** Use the S3 backend, set `create_plan_role = true` and
+   `state_bucket`, apply, then add the variables `AWS_PLAN_ROLE_ARN` (`terraform output -raw plan_role_arn`),
+   `TF_STATE_BUCKET`, and `TF_VARS_JSON` (your `terraform.tfvars` values as one JSON object). Pull requests that
+   change `infra/` then show the plan in the job summary ([ADR 0007](docs/adr/0007-read-only-plan-role.md)).
+
+### Run the checks locally
 
 ```bash
 uvx --with-requirements app/requirements-dev.txt pytest -q
-docker build -t oidc-lab app
+docker build -t oidc-lab app && trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 oidc-lab
+(cd infra && terraform init -backend=false && terraform test)
 pre-commit run --all-files
 ```
 
+[CONTRIBUTING.md](CONTRIBUTING.md) has the full list, including Semgrep, Checkov and tflint. None of them need AWS.
+
 ## Checks you can repeat
 
-- **A feature branch cannot assume the role.** Copy the credentials step into a workflow on a branch other than `main`
-  with no environment and run it. The step fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity`,
-  because the token's subject is `repo:OWNER/REPO:ref:refs/heads/<branch>`.
-- **A pull request cannot request a token at all.** `ci.yml` has no `id-token: write`, so any attempt to fetch a token
-  fails before AWS is involved.
-- **The federated session is visible in CloudTrail.** Look up `AssumeRoleWithWebIdentity` events in the region. The
-  event shows `userIdentity.type: WebIdentityUser`, the identity provider `token.actions.githubusercontent.com`, the
-  subject in `userIdentity.userName`, and the session name `gha-<run_id>-<attempt>`, which links it to one workflow run.
+- **A job without the environment cannot assume the role.** Copy the credentials step into a workflow on `main` or
+  any branch with no `environment` and run it. It fails with `Not authorized to perform
+  sts:AssumeRoleWithWebIdentity`, because the token's subject is `repo:OWNER/REPO:ref:refs/heads/<branch>`.
+- **A pull request cannot deploy.** `ci.yml`, `lint.yml` and `security.yml` have no `id-token: write`. The
+  optional `plan.yml` gets a token with the `pull_request` subject, which the deploy role refuses and only the
+  read-only plan role accepts. Fork pull requests get no token at all.
+- **The deployed image is the attested one.** Take the digest from the deploy job summary and run
+  `gh attestation verify oci://YOUR_ECR_REPOSITORY_URL@sha256:DIGEST --repo OWNER/REPO`.
+- **The federated session is visible in CloudTrail.** Look up `AssumeRoleWithWebIdentity` events. The event shows
+  `userIdentity.type: WebIdentityUser`, the provider `token.actions.githubusercontent.com`, the subject, and the
+  session name `gha-<run_id>-<attempt>`, which links it to one workflow run.
 
   ```bash
   aws cloudtrail lookup-events \
@@ -143,14 +190,34 @@ pre-commit run --all-files
 ## Cost and teardown
 
 The costs are the Fargate task while it runs, ECR storage for at most 10 images (a lifecycle rule expires the rest),
-CloudWatch Logs and Container Insights, and one customer managed KMS key for the logs. Scale the service to zero
-tasks between demos:
+CloudWatch Logs and Container Insights, and one customer managed KMS key for the logs (about 1 USD per month). The
+GitHub side is free for public repositories. Scale the service to zero tasks between demos:
 
 ```bash
 terraform apply -var desired_count=0
 ```
 
 `terraform destroy` removes everything, including images in the repository (`ecr_force_delete` defaults to `true`).
+The KMS key is deleted after its 7-day waiting period. A state bucket created for the backend is not part of this
+stack; delete it separately.
+
+## Honest limits
+
+- **Not run against AWS in CI.** The trust and permission policies are tested offline with a mocked provider
+  ([ADR 0008](docs/adr/0008-offline-policy-tests.md)). That proves what the JSON says, not how AWS evaluates it; the
+  manual checks above cover that.
+- **Some controls live in GitHub settings, not in code:** the `production` environment's reviewer and branch
+  policy, and branch protection with the required checks. The repository documents them; it cannot enforce them.
+- **The permission policy limits where the job deploys, not what.** Anyone who can merge to `main` and approve
+  `production` can ship any image that passes the gates.
+- **Attestations are verified by the pipeline, not by ECS.** Nothing stops someone with console access from
+  registering a task definition with an unverified image.
+- **No load balancer.** The service has no public endpoint by default, so post-deploy verification relies on the
+  container health check unless you set `APP_URL`.
+- **Single environment.** One account, one `production` environment. A real setup would add a staging environment,
+  ideally in its own account, with its own role and subject.
+- **The optional plan role exposes state to same-repository pull requests.** Fine for this stack, not for one
+  whose state holds secrets ([ADR 0007](docs/adr/0007-read-only-plan-role.md)).
 
 ## Variants
 

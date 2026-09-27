@@ -1,0 +1,10 @@
+# Remote state for this stack. Copy to backend.tf and pass the rest with
+# `terraform init -backend-config=backend.hcl` (see backend.hcl.example).
+# The bucket is created once, outside this stack, with versioning and
+# default encryption on. use_lockfile keeps the lock in S3; no DynamoDB table.
+terraform {
+  backend "s3" {
+    encrypt      = true
+    use_lockfile = true
+  }
+}

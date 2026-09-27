@@ -3,9 +3,9 @@ output "deploy_role_arn" {
   value       = aws_iam_role.deploy.arn
 }
 
-output "ecr_repository" {
-  description = "Put this in the repository variable ECR_REPOSITORY."
-  value       = aws_ecr_repository.app.name
+output "ecr_repository_url" {
+  description = "Put this in the repository variable ECR_REPOSITORY_URL."
+  value       = aws_ecr_repository.app.repository_url
 }
 
 output "ecs_cluster" {
@@ -26,4 +26,9 @@ output "task_definition_family" {
 output "trusted_subjects" {
   description = "The only OIDC subjects the deploy role accepts."
   value       = local.trusted_subjects
+}
+
+output "plan_role_arn" {
+  description = "Put this in the repository variable AWS_PLAN_ROLE_ARN. Null unless create_plan_role is true."
+  value       = one(aws_iam_role.plan[*].arn)
 }

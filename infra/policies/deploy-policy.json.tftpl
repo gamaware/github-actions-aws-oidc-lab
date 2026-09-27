@@ -59,6 +59,23 @@
       }
     },
     {
+      "Sid": "EcsListTasksInOneCluster",
+      "Effect": "Allow",
+      "Action": "ecs:ListTasks",
+      "Resource": "*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "${ecs_cluster_arn}"
+        }
+      }
+    },
+    {
+      "Sid": "EcsDescribeTasksInOneCluster",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTasks",
+      "Resource": "${ecs_task_arn}"
+    },
+    {
       "Sid": "PassOnlyTheExecutionRoleToEcs",
       "Effect": "Allow",
       "Action": "iam:PassRole",

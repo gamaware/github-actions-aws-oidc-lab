@@ -1,0 +1,3 @@
+bucket = "YOUR_STATE_BUCKET"
+key    = "github-actions-aws-oidc-lab/terraform.tfstate"
+region = "us-east-1"

@@ -5,13 +5,16 @@ data "aws_partition" "current" {}
 locals {
   github_repository = "${var.github_owner}/${var.github_repo}"
 
-  # The two OIDC subjects the deploy role accepts. A job that declares
-  # `environment: production` gets the environment subject; any other job
-  # on the branch gets the ref subject. Every other subject is refused.
+  # The only OIDC subject the deploy role accepts. GitHub issues it only to a
+  # job that declares `environment: production`, after the environment's
+  # branch policy and required reviewer pass. Jobs on `main` without the
+  # environment get a ref subject and are refused (docs/adr/0002).
   trusted_subjects = [
-    "repo:${local.github_repository}:ref:refs/heads/${var.github_branch}",
     "repo:${local.github_repository}:environment:${var.github_environment}",
   ]
+
+  # Every revision of the lab's task definition family.
+  task_definition_family_arn = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${aws_ecs_task_definition.app.family}:*"
 
   oidc_provider_arn = var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
 }
@@ -48,8 +51,10 @@ resource "aws_iam_role_policy" "deploy" {
     ecr_repository_arn = aws_ecr_repository.app.arn
     ecs_service_arn    = aws_ecs_service.app.id
     execution_role_arn = aws_iam_role.execution.arn
+    ecs_cluster_arn    = aws_ecs_cluster.this.arn
+    ecs_task_arn       = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task/${aws_ecs_cluster.this.name}/*"
 
-    task_definition_family_arn = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${aws_ecs_task_definition.app.family}:*"
+    task_definition_family_arn = local.task_definition_family_arn
   })
 }
 

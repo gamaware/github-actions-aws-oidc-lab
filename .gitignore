@@ -7,6 +7,7 @@
 crash.log
 crash.*.log
 *.tfplan
+backend.hcl
 
 # Secrets
 .env
@@ -24,4 +25,6 @@ __pycache__/
 
 # Tools
 .firecrawl/
+*.sarif
+sbom.*.json
 .DS_Store
