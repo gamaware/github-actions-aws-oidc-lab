@@ -14,6 +14,12 @@ reviews:
         GitLab CI example of the same deploy. The AWS role must trust only the exact project_path and
         protected ref subject, the id token audience must be sts.amazonaws.com, and no AWS keys may appear
         as CI variables. Check that tests/test_gitlab_example.py still covers any change.
+    - path: "examples/codepipeline/**"
+      instructions: >-
+        CodePipeline and CodeBuild path of the same deploy. Every IAM action named in full, every statement
+        scoped to this pipeline's bucket, key, projects, repository, service or execution role, artifacts
+        encrypted with the pipeline key, and the manual approval before the ECS deploy. Check that
+        terraform/tests/codepipeline.tftest.hcl and tests/test_codepipeline_example.py cover any change.
     - path: ".github/workflows/**"
       instructions: >-
         permissions: {} at the top and per-job grants, actions pinned to full SHAs with a version comment,

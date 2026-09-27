@@ -116,6 +116,7 @@ jobs:
           uvx checkov==3.3.19
           --directory infra/terraform
           --directory examples/gitlab-ci/terraform
+          --directory examples/codepipeline/terraform
           --framework terraform
           --quiet --compact
           --output cli --output sarif

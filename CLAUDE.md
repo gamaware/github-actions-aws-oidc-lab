@@ -11,8 +11,12 @@ GitLab's OIDC tokens. Everything is verified offline; nothing in `make verify` c
   templates in `policies/`; `tests/iam.tftest.hcl` asserts them with a mocked provider.
 - `examples/gitlab-ci/`: `.gitlab-ci.yml` plus `terraform/` for the GitLab OIDC provider and role, with its own
   mocked tests. `tests/test_gitlab_example.py` asserts the pipeline's security properties.
+- `examples/codepipeline/`: the AWS-native path. `buildspec-build.yml` and `buildspec-verify.yml` plus
+  `terraform/` for CodePipeline, two CodeBuild projects, the encrypted artifact bucket and three scoped roles, with
+  mocked tests. `tests/test_codepipeline_example.py` asserts the buildspecs' properties.
 - `tests/`: repository-level tests (workflow and pipeline properties).
-- `scripts/`: `verify-deployment.sh` (used by both pipelines) and `test-live.sh` (manual, real AWS).
+- `scripts/`: `verify-deployment.sh` (used by every pipeline), `test-live.sh` and `test-live-codepipeline.sh`
+  (manual, real AWS).
 - `docs/adr/`, `docs/diagrams/` (`.drawio` source plus exported PNG), `docs/threat-notes.md`,
   `docs/deploy-runbook.md`, `docs/jenkins-pattern.md`.
 
@@ -23,14 +27,15 @@ GitLab's OIDC tokens. Everything is verified offline; nothing in `make verify` c
 - Workflows: `permissions: {}` at the top, per-job grants, actions pinned to full SHAs, no `pull_request_target`,
   no `id-token` on pull request jobs.
 - Checkov skips only inline with a reason. Never blanket-skip.
-- `make test-live` touches the `dev` AWS profile. Never run it unless the maintainer asks; never commit its output.
+- `make test-live` and `make test-live-codepipeline` touch the `dev` AWS profile. Never run them unless the
+  maintainer asks; never commit their output.
 
 ## Commands
 
 ```bash
 make verify          # everything CI runs, offline
 make test            # pytest only
-make terraform       # fmt, validate, test, tflint for both Terraform roots
+make terraform       # fmt, validate, test, tflint for every Terraform root
 pre-commit run --all-files
 ```
 

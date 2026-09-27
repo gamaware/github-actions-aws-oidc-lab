@@ -19,16 +19,20 @@ make semgrep     # the Semgrep rulesets of the security gate
 pre-commit run --all-files
 ```
 
-None of these need AWS credentials. `terraform test` uses a mocked provider. `make test-live` is the only target
-that touches AWS; the maintainer runs it by hand in a sandbox account (see the README).
+None of these need AWS credentials. `terraform test` uses a mocked provider. `make test-live` and
+`make test-live-codepipeline` are the only targets that touch AWS; the maintainer runs them by hand in a sandbox
+account (see the README).
 
 ## Rules for changes
 
-- **Trust and permission policies.** Any change to `infra/terraform/policies/`, `infra/terraform/iam.tf` or
-  `examples/gitlab-ci/terraform/` needs a matching assertion in the `*.tftest.hcl` next to it. A change to a
-  recorded decision needs a new ADR in `docs/adr/`.
+- **Trust and permission policies.** Any change to `infra/terraform/policies/`, `infra/terraform/iam.tf`,
+  `examples/gitlab-ci/terraform/` or `examples/codepipeline/terraform/` needs a matching assertion in the
+  `*.tftest.hcl` next to it. A change to a recorded decision needs a new ADR in `docs/adr/`.
 - **GitLab example.** Changes to `examples/gitlab-ci/.gitlab-ci.yml` keep `tests/test_gitlab_example.py` green: one
   job with `id_tokens`, images pinned by digest, no AWS keys.
+- **CodePipeline example.** Changes to `examples/codepipeline/buildspec-*.yml` keep
+  `tests/test_codepipeline_example.py` green: every phase aborts on failure, tests and Trivy run before the push,
+  and the deploy gets the image by digest.
 - **Workflows.** Start from `permissions: {}` and grant per job. Pin every action and reusable workflow to a full
   commit SHA, with the version in a comment where one exists. Pass event data to scripts through `env`, not inline
   expressions. No `pull_request_target`. `tests/test_workflows.py`, `actionlint` and `zizmor` must pass.
