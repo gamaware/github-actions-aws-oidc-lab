@@ -12,9 +12,6 @@ import yaml
 
 WORKFLOWS = sorted((Path(__file__).resolve().parents[1] / ".github" / "workflows").glob("*.yml"))
 SHA_PIN = re.compile(r"^[^@]+@[0-9a-f]{40}$")
-# Reusable workflows from the shared repository are called by branch until
-# the re-pin pass (CHANGELOG, Unreleased).
-SHARED = re.compile(r"^gamaware/\.github/\.github/workflows/[a-z-]+\.yml@main$")
 
 
 def load(path):
@@ -58,7 +55,7 @@ def test_actions_are_pinned(workflow):
     _, wf = workflow
     unpinned = []
     for job in wf["jobs"].values():
-        if "uses" in job and not SHARED.match(job["uses"]):
+        if "uses" in job and not SHA_PIN.match(job["uses"]):
             unpinned.append(job["uses"])
         for step in job.get("steps", []):
             uses = step.get("uses")

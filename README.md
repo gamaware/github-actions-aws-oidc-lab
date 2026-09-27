@@ -142,8 +142,8 @@ docs/                      threat notes, deploy runbook, Jenkins pattern
 | Semgrep, Trivy image, Checkov | `security.yml` | Required gates with SARIF in code scanning ([ADR 0006](docs/adr/0006-security-gates.md)) |
 | OpenSSF Scorecard | `scorecard.yml` | The repository's own supply-chain practices |
 
-Every workflow starts from `permissions: {}` and grants per job; actions are pinned to full commit SHAs (the
-shared reusable workflows are the one exception, see the limits below), and there is no `pull_request_target`.
+Every workflow starts from `permissions: {}` and grants per job; actions and the shared reusable workflows are pinned to
+full commit SHAs, and there is no `pull_request_target`.
 Pre-commit runs the same hygiene locally, plus detect-secrets and conventional commit messages.
 The required check names and the branch protection command are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -167,7 +167,6 @@ The required check names and the branch protection command are in [CONTRIBUTING.
   a load balancer, and VPC endpoints for ECR, S3 and CloudWatch Logs so task egress no longer needs the internet.
 - **The optional plan role can read state** for same-repository pull requests. That is acceptable for this stack and
   would not be for a stack whose state holds secrets ([ADR 0007](docs/adr/0007-read-only-plan-role.md)).
-- **Shared workflows are called by branch** until the re-pin pass pins them to a reviewed commit.
 
 ## Related work
 

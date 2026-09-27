@@ -5,9 +5,6 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-To do before `v1.0.0`: re-pin the reusable workflows in `.github/workflows/ci.yml` from
-`gamaware/.github/...@main` to a reviewed commit SHA, and drop the `ref-pin` exception in `.github/zizmor.yml`.
-
 ### Added
 
 - GitLab CI equivalent in `examples/gitlab-ci/`: a pipeline with the same build-once, scan, deploy-by-digest and
@@ -18,6 +15,8 @@ To do before `v1.0.0`: re-pin the reusable workflows in `.github/workflows/ci.ym
   check the roles with the IAM policy simulator, always destroy).
 - pytest suites for the workflow hardening rules and the GitLab pipeline's properties.
 - Terraform outputs for the GitLab example and a `tags` variable.
+- Social preview (`docs/assets/social-preview.png`, 1280x640) rendered from `docs/assets/social-preview.json`
+  with the shared generator.
 - Context and deployment diagrams with official AWS icons, the cover image, a deploy runbook, `CLAUDE.md`, editor
   hooks in `.claude/`, `.editorconfig`, `.coderabbit.yaml`, Copilot review instructions, Vale configuration and a weekly
   pre-commit hook update workflow (needs the `PRE_COMMIT_PAT` secret in an `automation` environment).
@@ -42,8 +41,8 @@ To do before `v1.0.0`: re-pin the reusable workflows in `.github/workflows/ci.ym
 
 - Terraform moved from `infra/` to `infra/terraform/`, and `CODEOWNERS` to the repository root.
 - `ci.yml` is a thin caller: `make verify` plus the shared `lint-docs`, `lint-actions`, `secrets`, `container` and
-  `security` workflows. `lint.yml` is removed; its checks run in `make verify`. Required check names changed (see
-  CONTRIBUTING.md).
+  `security` workflows, pinned to commit `1255caafb08b06cc4658318c4dd48f9dea946c9e` of `gamaware/.github`.
+  `lint.yml` is removed; its checks run in `make verify`. Required check names changed (see CONTRIBUTING.md).
 - Checkov in `security.yml` also scans `examples/gitlab-ci/terraform/`.
 - The README follows the portfolio template; setup, repeatable checks, cost and teardown moved to
   [docs/deploy-runbook.md](docs/deploy-runbook.md).

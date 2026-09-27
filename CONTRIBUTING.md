@@ -29,10 +29,9 @@ that touches AWS; the maintainer runs it by hand in a sandbox account (see the R
   recorded decision needs a new ADR in `docs/adr/`.
 - **GitLab example.** Changes to `examples/gitlab-ci/.gitlab-ci.yml` keep `tests/test_gitlab_example.py` green: one
   job with `id_tokens`, images pinned by digest, no AWS keys.
-- **Workflows.** Start from `permissions: {}` and grant per job. Pin every action to a full commit SHA with the
-  version in a comment; only the reusable workflows from `gamaware/.github` are called by branch until they are
-  re-pinned (`.github/zizmor.yml`). Pass event data to scripts through `env`, not inline expressions. No
-  `pull_request_target`. `tests/test_workflows.py`, `actionlint` and `zizmor` must pass.
+- **Workflows.** Start from `permissions: {}` and grant per job. Pin every action and reusable workflow to a full
+  commit SHA, with the version in a comment where one exists. Pass event data to scripts through `env`, not inline
+  expressions. No `pull_request_target`. `tests/test_workflows.py`, `actionlint` and `zizmor` must pass.
 - **Linting.** Fix findings; do not suppress them. A Checkov or Trivy skip is allowed only next to the resource,
   with the reason.
 - **Content.** English, dateless, placeholders only (`OWNER/REPO`, `YOUR_STATE_BUCKET`); never a real account ID,
