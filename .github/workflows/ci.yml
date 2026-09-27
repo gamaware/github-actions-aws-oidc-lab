@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   verify:
-    name: make verify
+    name: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -71,14 +71,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: make verify
 
-  docs:
-    name: docs
+  lint-docs:
+    name: lint-docs
     permissions:
       contents: read
     uses: gamaware/.github/.github/workflows/lint-docs.yml@1255caafb08b06cc4658318c4dd48f9dea946c9e
 
-  actions:
-    name: actions
+  lint-actions:
+    name: lint-actions
     permissions:
       contents: read
     uses: gamaware/.github/.github/workflows/lint-actions.yml@1255caafb08b06cc4658318c4dd48f9dea946c9e
@@ -101,8 +101,8 @@ jobs:
 
   # Semgrep and Checkov run as SARIF gates in security.yml; the shared job adds
   # a Trivy scan of the whole repository (vulnerabilities, secrets, IaC).
-  repo-scan:
-    name: repo-scan
+  security:
+    name: security
     permissions:
       contents: read
     uses: gamaware/.github/.github/workflows/security.yml@1255caafb08b06cc4658318c4dd48f9dea946c9e

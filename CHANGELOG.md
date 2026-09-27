@@ -45,14 +45,16 @@ the project uses [Semantic Versioning](https://semver.org/).
   example ([ADR 0007](docs/adr/0007-read-only-plan-role.md)).
 - tflint and `terraform test` in CI; Terraform pinned in `infra/terraform/.terraform-version`.
 - OpenSSF Scorecard workflow.
-- ADRs, CODEOWNERS, SECURITY.md, CONTRIBUTING.md, a pull request template and this changelog.
+- ADRs, CODEOWNERS, SECURITY.md and this changelog.
 
 ### Changed
 
 - Terraform moved from `infra/` to `infra/terraform/`, and `CODEOWNERS` to the repository root.
 - `ci.yml` is a thin caller: `make verify` plus the shared `lint-docs`, `lint-actions`, `secrets`, `container` and
   `security` workflows, pinned to commit `1255caafb08b06cc4658318c4dd48f9dea946c9e` of `gamaware/.github`.
-  `lint.yml` is removed; its checks run in `make verify`. Required check names changed (see CONTRIBUTING.md).
+  `lint.yml` is removed; its checks run in `make verify`. The caller jobs are `verify`, `lint-docs`, `lint-actions`,
+  `secrets`, `container` and `security`, so the required check names match the other portfolio repositories (see the
+  README's gates table).
 - Checkov in `security.yml` also scans `examples/gitlab-ci/terraform/`.
 - The README follows the portfolio template; setup, repeatable checks, cost and teardown moved to
   [docs/deploy-runbook.md](docs/deploy-runbook.md).
@@ -66,6 +68,11 @@ Relative to the first draft of the lab:
 - The repository variable `ECR_REPOSITORY` is replaced by `ECR_REPOSITORY_URL` (Terraform output
   `ecr_repository_url`).
 - Every workflow starts from `permissions: {}` and grants permissions per job.
+
+### Removed
+
+- `CONTRIBUTING.md` and the pull request template: inherited from `gamaware/.github`. The required checks moved to the
+  README and the branch protection command to the deploy runbook.
 
 ### Fixed
 

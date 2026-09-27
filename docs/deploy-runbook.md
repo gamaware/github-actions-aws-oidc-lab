@@ -5,7 +5,7 @@ checks in the [README](../README.md) need none of this.
 
 ## Deploy it
 
-Prerequisites: Terraform 1.9 or later (CI pins the version in `infra/terraform/.terraform-version`), AWS
+Prerequisites: Terraform 1.11 or later (CI pins the version in `infra/terraform/.terraform-version`), AWS
 credentials for a sandbox account with IAM admin rights (only for this one-time setup), a VPC with subnets that can
 reach ECR, and a copy of this repository under your own account.
 
@@ -36,7 +36,9 @@ reach ECR, and a copy of this repository under your own account.
    | `ECS_TASK_FAMILY` | `terraform output -raw task_definition_family` |
    | `APP_URL` (optional) | base URL that reaches the service, for the HTTP part of the verification |
 
-4. **Turn on the required checks** listed in [CONTRIBUTING.md](../CONTRIBUTING.md) with the `gh api` command there.
+4. **Turn on the required checks** listed in the README's
+   [security and quality gates](../README.md#security-and-quality-gates) with the command in
+   [Repository settings](#repository-settings).
 
 5. **Push to `main`.** Approve the deployment, then watch the build, push, deploy and verification steps. The
    service starts with `desired_count = 0`; set it to `1` and apply again once the first image exists.
@@ -65,6 +67,45 @@ reach ECR, and a copy of this repository under your own account.
     --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity \
     --max-results 5
   ```
+
+## Repository settings
+
+Branch protection on `main` requires the checks in the README's gates table and one approving review from a code
+owner. Apply it with:
+
+```bash
+gh api --method PUT repos/OWNER/REPO/branches/main/protection --input - <<'EOF'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "verify",
+      "lint-docs / markdownlint", "lint-docs / links", "lint-docs / vale",
+      "lint-actions / actionlint", "lint-actions / zizmor", "secrets / gitleaks",
+      "container / hadolint", "container / build-scan", "security / trivy",
+      "Semgrep (code)", "Trivy (image)", "Checkov (infra)"
+    ]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 1,
+    "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": true
+  },
+  "required_conversation_resolution": true,
+  "required_linear_history": true,
+  "restrictions": null
+}
+EOF
+```
+
+`Terraform plan (read-only)` is not required: it is skipped when the plan role is not configured and for fork pull
+requests.
+
+`update-pre-commit-hooks.yml` opens a weekly pull request with new hook versions. It reads the `PRE_COMMIT_PAT`
+secret (a fine-grained token with contents and pull request write access to this repository) from an environment
+named `automation`. Limit that environment's deployment branches to `main`, so a workflow changed on another branch
+cannot read the token.
 
 ## Cost and teardown
 

@@ -160,7 +160,7 @@ docs/                      threat notes, deploy runbook, Jenkins pattern
 
 | Gate | Where | Why |
 | --- | --- | --- |
-| `make verify` | `ci.yml` | Same command as locally: tests, Terraform tests, linters, Checkov, workflow scanners |
+| `make verify` | `ci.yml` (`verify`) | Same command as locally: tests, Terraform tests, linters, Checkov, workflow scanners |
 | markdownlint, lychee, Vale | `ci.yml`, shared `lint-docs` | Docs stay readable and links stay alive |
 | actionlint, zizmor | `ci.yml`, shared `lint-actions` | Workflow syntax and known-bad patterns |
 | gitleaks | `ci.yml`, shared `secrets` | No credentials in history |
@@ -169,10 +169,22 @@ docs/                      threat notes, deploy runbook, Jenkins pattern
 | Semgrep, Trivy image, Checkov | `security.yml` | Required gates with SARIF in code scanning ([ADR 0006](docs/adr/0006-security-gates.md)) |
 | OpenSSF Scorecard | `scorecard.yml` | The repository's own supply-chain practices |
 
-Every workflow starts from `permissions: {}` and grants per job; actions and the shared reusable workflows are pinned to
-full commit SHAs, and there is no `pull_request_target`.
-Pre-commit runs the same hygiene locally, plus detect-secrets and conventional commit messages.
-The required check names and the branch protection command are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Every workflow starts from `permissions: {}` and grants per job; actions and the shared reusable workflows are pinned
+to full commit SHAs, and there is no `pull_request_target`. Pre-commit runs the same hygiene locally, plus
+detect-secrets and conventional commit messages.
+
+Branch protection on `main` requires these checks; the command that applies them is in the
+[deploy runbook](docs/deploy-runbook.md#repository-settings):
+
+| Check | Workflow |
+| --- | --- |
+| `verify` | `ci.yml` (`make verify`) |
+| `lint-docs / markdownlint`, `lint-docs / links`, `lint-docs / vale` | `ci.yml` (shared `lint-docs`) |
+| `lint-actions / actionlint`, `lint-actions / zizmor` | `ci.yml` (shared `lint-actions`) |
+| `secrets / gitleaks` | `ci.yml` (shared `secrets`) |
+| `container / hadolint`, `container / build-scan` | `ci.yml` (shared `container`) |
+| `security / trivy` | `ci.yml` (shared `security`, Trivy on the repository) |
+| `Semgrep (code)`, `Trivy (image)`, `Checkov (infra)` | `security.yml` (SARIF gates) |
 
 ## Limits and production adaptations
 

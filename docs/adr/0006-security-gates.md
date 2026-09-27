@@ -21,8 +21,8 @@ The `security` workflow runs three jobs on every pull request, on every push to 
 | `Checkov (infra)` | Checkov | `infra/terraform/`, `examples/gitlab-ci/terraform/` and `examples/codepipeline/terraform/` | any failed check without an inline skip |
 
 Each job uploads SARIF to GitHub code scanning with its own category, even when the gate fails. The three check
-names are required status checks on `main`, next to the `ci` workflow's `make verify` and
-the shared checks it calls (see CONTRIBUTING.md).
+names are required status checks on `main`, next to the `ci` workflow's `verify` job (`make verify`) and
+the shared checks it calls (see the README's gates table).
 
 Tool versions are pinned (`semgrep==1.178.0`, `checkov==3.3.19`, Trivy 0.74.0 installed from the release archive
 after a SHA-256 check, as the shared `gamaware/.github` workflows do). Rulesets are named
@@ -42,9 +42,9 @@ explicitly instead of `--config auto`, so the rules do not depend on detection a
 ## Compliance
 
 - Branch protection on `main` lists the three check names as required. This is a repository setting, applied with
-  the `gh api` command in [CONTRIBUTING.md](../../CONTRIBUTING.md).
+  the `gh api` command in the [deploy runbook](../deploy-runbook.md#repository-settings).
 - Findings are visible in the Security tab, filtered by category `semgrep`, `trivy-image` or `checkov-infra`.
 
 ## Notes
 
-- The same scanners run locally: `make verify` and `make semgrep` (see "Verify locally" in the README and CONTRIBUTING.md).
+- The same scanners run locally: `make verify` and `make semgrep` (see "Verify locally" in the README).
