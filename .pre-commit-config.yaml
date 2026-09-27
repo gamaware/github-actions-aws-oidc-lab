@@ -56,6 +56,14 @@ repos:
       - id: shellcheck
         args: [--severity=style]
 
+  - repo: local
+    hooks:
+      - id: shellharden
+        name: shellharden
+        entry: shellharden --check
+        language: system
+        types: [shell]
+
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:

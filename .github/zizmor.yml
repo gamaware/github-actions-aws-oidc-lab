@@ -1,0 +1,9 @@
+# Reusable workflows from gamaware/.github are called by branch until the
+# re-pin pass pins them to a reviewed commit (CHANGELOG, Unreleased).
+# Every other action stays pinned to a full commit SHA.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "gamaware/.github/*": ref-pin
+        "*": hash-pin

@@ -12,45 +12,46 @@ This is a personal lab, but issues and pull requests are welcome.
 ## Run the checks locally
 
 ```bash
-uvx --with-requirements app/requirements-dev.txt pytest -q
-docker build -t oidc-lab app
-trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 oidc-lab
-(cd infra/terraform && terraform init -backend=false && terraform validate && terraform test)
-(cd infra/terraform && tflint --init --config .tflint.hcl && tflint --config .tflint.hcl)
-uvx checkov==3.3.19 --directory infra/terraform --framework terraform --quiet --compact
-uvx semgrep==1.178.0 scan --metrics=off --error \
-  --config p/python --config p/dockerfile --config p/github-actions --config p/terraform --config p/secrets
+make verify      # offline: pytest, ruff, terraform fmt/validate/test/tflint, Checkov,
+                 # shellcheck, shellharden, hadolint, actionlint and zizmor
+make image       # build the image and gate it with Trivy (needs Docker)
+make semgrep     # the Semgrep rulesets of the security gate
 pre-commit run --all-files
 ```
 
-None of these need AWS credentials. `terraform test` uses a mocked provider.
+None of these need AWS credentials. `terraform test` uses a mocked provider. `make test-live` is the only target
+that touches AWS; the maintainer runs it by hand in a sandbox account (see the README).
 
 ## Rules for changes
 
-- **Trust and permission policies.** Any change to `infra/terraform/policies/` or `infra/terraform/iam.tf` needs a
-  matching assertion in `infra/terraform/tests/iam.tftest.hcl`. A change to a recorded decision needs a new ADR in `docs/adr/`.
+- **Trust and permission policies.** Any change to `infra/terraform/policies/`, `infra/terraform/iam.tf` or
+  `examples/gitlab-ci/terraform/` needs a matching assertion in the `*.tftest.hcl` next to it. A change to a
+  recorded decision needs a new ADR in `docs/adr/`.
+- **GitLab example.** Changes to `examples/gitlab-ci/.gitlab-ci.yml` keep `tests/test_gitlab_example.py` green: one
+  job with `id_tokens`, images pinned by digest, no AWS keys.
 - **Workflows.** Start from `permissions: {}` and grant per job. Pin every action to a full commit SHA with the
-  version in a comment. Pass event data to scripts through `env`, not inline expressions. No
-  `pull_request_target`. `actionlint` and `zizmor` must pass.
-- **Linting.** Fix findings; do not suppress them. A Checkov skip is allowed only next to the resource, with the
-  reason.
+  version in a comment; only the reusable workflows from `gamaware/.github` are called by branch until they are
+  re-pinned (`.github/zizmor.yml`). Pass event data to scripts through `env`, not inline expressions. No
+  `pull_request_target`. `tests/test_workflows.py`, `actionlint` and `zizmor` must pass.
+- **Linting.** Fix findings; do not suppress them. A Checkov or Trivy skip is allowed only next to the resource,
+  with the reason.
 - **Content.** English, dateless, placeholders only (`OWNER/REPO`, `YOUR_STATE_BUCKET`); never a real account ID,
   ARN or IP address.
 
 ## Required status checks
 
-Branch protection on `main` requires these checks, plus one approving review from a code owner:
+Branch protection on `main` requires these checks, plus one approving review from a code owner. The `ci` jobs
+marked "shared" call reusable workflows from `gamaware/.github`.
 
 | Check | Workflow |
 | --- | --- |
-| `Unit tests` | `ci.yml` |
-| `Dockerfile lint` | `ci.yml` |
-| `Shell scripts` | `ci.yml` |
-| `actionlint and zizmor` | `lint.yml` |
-| `Terraform fmt, validate, test and tflint` | `lint.yml` |
-| `Semgrep (code)` | `security.yml` |
-| `Trivy (image)` | `security.yml` |
-| `Checkov (infra)` | `security.yml` |
+| `make verify` | `ci.yml` |
+| `docs / markdownlint`, `docs / links`, `docs / vale` | `ci.yml` (shared `lint-docs`) |
+| `actions / actionlint`, `actions / zizmor` | `ci.yml` (shared `lint-actions`) |
+| `secrets / gitleaks` | `ci.yml` (shared `secrets`) |
+| `container / hadolint`, `container / build-scan` | `ci.yml` (shared `container`) |
+| `repo-scan / trivy` | `ci.yml` (shared `security`, Trivy on the repository) |
+| `Semgrep (code)`, `Trivy (image)`, `Checkov (infra)` | `security.yml` (SARIF gates) |
 
 The repository owner applies them with:
 
@@ -60,8 +61,10 @@ gh api --method PUT repos/OWNER/REPO/branches/main/protection --input - <<'EOF'
   "required_status_checks": {
     "strict": true,
     "contexts": [
-      "Unit tests", "Dockerfile lint", "Shell scripts",
-      "actionlint and zizmor", "Terraform fmt, validate, test and tflint",
+      "make verify",
+      "docs / markdownlint", "docs / links", "docs / vale",
+      "actions / actionlint", "actions / zizmor", "secrets / gitleaks",
+      "container / hadolint", "container / build-scan", "repo-scan / trivy",
       "Semgrep (code)", "Trivy (image)", "Checkov (infra)"
     ]
   },
@@ -80,3 +83,10 @@ EOF
 
 `Terraform plan (read-only)` is not required: it is skipped when the plan role is not configured and for fork pull
 requests.
+
+## Pre-commit hook updates
+
+`update-pre-commit-hooks.yml` opens a weekly pull request with new hook versions. It reads the `PRE_COMMIT_PAT`
+secret (a fine-grained token with contents and pull request write access to this repository) from an environment
+named `automation`. Limit that environment's deployment branches to `main`, so a workflow changed on another branch
+cannot read the token.

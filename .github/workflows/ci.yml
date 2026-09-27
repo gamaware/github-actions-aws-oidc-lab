@@ -1,7 +1,10 @@
 name: ci
 
-# Pull requests build and test with no AWS access at all: no id-token
-# permission, no secrets, no role to assume.
+# Thin caller: the shared checks come from reusable workflows in
+# gamaware/.github, and `verify` runs the same `make verify` a reviewer runs
+# locally. Pull requests get no AWS access at all: no id-token permission, no
+# secrets, no role to assume. The image gates with SARIF live in security.yml
+# (docs/adr/0006-security-gates.md).
 on:
   pull_request:
   push:
@@ -14,12 +17,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Unit tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  verify:
+    name: make verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: read
+    env:
+      HADOLINT_VERSION: "2.15.1"
+      HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+      SHELLHARDEN_VERSION: "4.3.2"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,38 +36,76 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install test dependencies
-        run: python -m pip install --requirement app/requirements-dev.txt
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
 
-      - name: Run pytest
-        run: python -m pytest -q
+      # infra/terraform/.terraform-version is the single place the version is pinned.
+      - name: Read the pinned Terraform version
+        id: tf
+        run: echo "version=$(cat infra/terraform/.terraform-version)" >> "$GITHUB_OUTPUT"
 
-  dockerfile:
-    name: Dockerfile lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ steps.tf.outputs.version }}
+          terraform_wrapper: false
+
+      - uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef # v6.3.1
+        with:
+          tflint_version: v0.61.0
+
+      - name: Install hadolint and shellharden
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/hadolint" \
+            "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  $RUNNER_TEMP/bin/hadolint" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/bin/hadolint"
+          cargo install shellharden --locked --version "$SHELLHARDEN_VERSION" --root "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: make verify
+        env:
+          # Avoids the anonymous GitHub API rate limit when tflint fetches the AWS ruleset.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: make verify
+
+  docs:
+    name: docs
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+    uses: gamaware/.github/.github/workflows/lint-docs.yml@main
 
-      - name: Hadolint
-        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
-        with:
-          dockerfile: app/Dockerfile
-
-  shell:
-    name: Shell scripts
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  actions:
+    name: actions
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+    uses: gamaware/.github/.github/workflows/lint-actions.yml@main
 
-      - name: shellcheck
-        run: shellcheck --severity=style scripts/*.sh
+  secrets:
+    name: secrets
+    permissions:
+      contents: read
+    uses: gamaware/.github/.github/workflows/secrets.yml@main
+
+  container:
+    name: container
+    permissions:
+      contents: read
+    uses: gamaware/.github/.github/workflows/container.yml@main
+    with:
+      context: app
+      dockerfile: app/Dockerfile
+      image-name: oidc-lab
+
+  # Semgrep and Checkov run as SARIF gates in security.yml; the shared job adds
+  # a Trivy scan of the whole repository (vulnerabilities, secrets, IaC).
+  repo-scan:
+    name: repo-scan
+    permissions:
+      contents: read
+    uses: gamaware/.github/.github/workflows/security.yml@main
+    with:
+      run-semgrep: false
+      run-checkov: false
