@@ -36,7 +36,8 @@ at plan time instead of widening the trust policy.
 
 ## Compliance
 
-Automated, in `terraform test` (`infra/terraform/tests/iam.tftest.hcl`, run by the `lint` workflow on every pull request):
+Automated, in `terraform test` (`infra/terraform/tests/iam.tftest.hcl`, run by `make verify` in the `ci` workflow on
+every pull request):
 
 - `deploy_trust_accepts_exactly_the_production_environment` asserts the only condition operator is
   `StringEquals`, the only keys are `aud` and `sub`, `aud` is `sts.amazonaws.com`, the subject list is exactly

@@ -18,11 +18,11 @@ The `security` workflow runs three jobs on every pull request, on every push to 
 | --- | --- | --- | --- |
 | `Semgrep (code)` | Semgrep, rulesets `p/python`, `p/dockerfile`, `p/github-actions`, `p/terraform`, `p/secrets` | whole repository | any finding |
 | `Trivy (image)` | Trivy | the built image | HIGH or CRITICAL with a released fix (`ignore-unfixed`) |
-| `Checkov (infra)` | Checkov | `infra/terraform/` | any failed check without an inline skip |
+| `Checkov (infra)` | Checkov | `infra/terraform/` and `examples/gitlab-ci/terraform/` | any failed check without an inline skip |
 
 Each job uploads SARIF to GitHub code scanning with its own category, even when the gate fails. The three check
-names are required status checks on `main`, next to `Unit tests`, `actionlint and zizmor` and
-`Terraform fmt, validate, test and tflint`.
+names are required status checks on `main`, next to the `ci` workflow's `make verify` and
+the shared checks it calls (see CONTRIBUTING.md).
 
 Tool versions are pinned (`semgrep==1.178.0`, `checkov==3.3.19`, the Trivy action by commit SHA). Rulesets are named
 explicitly instead of `--config auto`, so the rules do not depend on detection and metrics stay off.
@@ -46,4 +46,4 @@ explicitly instead of `--config auto`, so the rules do not depend on detection a
 
 ## Notes
 
-- The same scanners run locally: see "Run the checks locally" in the README.
+- The same scanners run locally: `make verify` and `make semgrep` (see "Verify locally" in the README and CONTRIBUTING.md).

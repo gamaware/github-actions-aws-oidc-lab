@@ -21,13 +21,15 @@ Test the rendered policies, not the Terraform code, with `terraform test` and `m
 - Assertions state security properties: exactly these subjects, this audience, only `StringEquals`, no wildcard
   actions, Resource `*` only in named statements, `iam:PassRole` only for the execution role, the plan role
   read-only and off by default, and variable validations that refuse wildcards.
-- The tests run in the `lint` workflow and locally with `terraform test` in `infra/terraform/`, with no AWS credentials.
+- The tests run in `make verify`, locally and in the `ci` workflow, with no AWS credentials. `make test-live` checks
+  the same policies with the IAM policy simulator in a sandbox account, on demand.
 
 ## Consequences
 
 - Policy regressions fail in seconds on every pull request, with no cloud access.
-- The tests do not prove that AWS evaluates the policies as intended. The README's "Checks you can repeat" section
-  lists the manual online checks (a feature-branch assume that must fail, CloudTrail evidence).
+- The tests do not prove that AWS evaluates the policies as intended. The "Checks you can repeat" section of the
+  [deploy runbook](../deploy-runbook.md) lists the manual online checks
+  (a feature-branch assume that must fail, CloudTrail evidence).
 - Policies built with `aws_iam_policy_document` data sources are mocked, so their JSON is not real in these tests.
   That is why the two policies under test are templates.
 

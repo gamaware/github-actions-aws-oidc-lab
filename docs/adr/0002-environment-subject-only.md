@@ -37,18 +37,18 @@ before it issues a token with that subject.
   (`build` in `deploy.yml`, the Scorecard workflow) can hold `id-token: write` without being able to reach AWS.
 - The environment's branch policy is now a security control, not a convenience. If someone removes the `main`
   restriction, a feature branch that declares `environment: production` would get the trusted subject after
-  review. Setup step 2 in the README configures it, and the threat notes list the case.
+  review. Step 2 of the [deploy runbook](../deploy-runbook.md) configures it, and the threat notes list the case.
 - A future unattended deploy (no reviewer) needs its own environment without reviewers and its own subject in
   the list, decided in a new ADR.
 
 ## Compliance
 
-Automated: `deploy_trust_accepts_exactly_the_production_environment` in `infra/terraform/tests/iam.tftest.hcl` asserts the
-subject list equals `["repo:example-owner/example-repo:environment:production"]`, so adding the branch subject
-back fails the `lint` workflow.
+Automated: `deploy_trust_accepts_exactly_the_production_environment` in `infra/terraform/tests/iam.tftest.hcl`
+asserts the subject list equals `["repo:example-owner/example-repo:environment:production"]`, so adding the branch
+subject back fails `make verify` in the `ci` workflow.
 
 Manual: the `production` environment settings (required reviewer, deployment branches limited to `main`) live in
-GitHub, not in this repository. The README lists them as a setup step.
+GitHub, not in this repository. The [deploy runbook](../deploy-runbook.md) lists them as a setup step.
 
 ## Notes
 

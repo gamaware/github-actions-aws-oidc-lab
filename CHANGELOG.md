@@ -5,7 +5,22 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+To do before `v1.0.0`: re-pin the reusable workflows in `.github/workflows/ci.yml` from
+`gamaware/.github/...@main` to a reviewed commit SHA, and drop the `ref-pin` exception in `.github/zizmor.yml`.
+
 ### Added
+
+- GitLab CI equivalent in `examples/gitlab-ci/`: a pipeline with the same build-once, scan, deploy-by-digest and
+  verify stages, and a Terraform root for the GitLab OIDC provider and a deploy role that reuses the GitHub deploy
+  policy ([ADR 0009](docs/adr/0009-gitlab-ci-example.md)).
+- Jenkins pattern: [docs/jenkins-pattern.md](docs/jenkins-pattern.md).
+- `make verify` (the offline checks CI runs) and `make test-live` (manual: apply both roots to a sandbox account,
+  check the roles with the IAM policy simulator, always destroy).
+- pytest suites for the workflow hardening rules and the GitLab pipeline's properties.
+- Terraform outputs for the GitLab example and a `tags` variable.
+- Context and deployment diagrams with official AWS icons, the cover image, a deploy runbook, `CLAUDE.md`, editor
+  hooks in `.claude/`, `.editorconfig`, `.coderabbit.yaml`, Copilot review instructions, Vale configuration and a weekly
+  pre-commit hook update workflow (needs the `PRE_COMMIT_PAT` secret in an `automation` environment).
 
 - The lab: a GitHub OIDC provider, a deploy role scoped to one ECR repository and one ECS service, a Fargate
   service, pull request CI with no cloud access, and threat notes.
@@ -24,6 +39,16 @@ the project uses [Semantic Versioning](https://semver.org/).
 - ADRs, CODEOWNERS, SECURITY.md, CONTRIBUTING.md, a pull request template and this changelog.
 
 ### Changed
+
+- Terraform moved from `infra/` to `infra/terraform/`, and `CODEOWNERS` to the repository root.
+- `ci.yml` is a thin caller: `make verify` plus the shared `lint-docs`, `lint-actions`, `secrets`, `container` and
+  `security` workflows. `lint.yml` is removed; its checks run in `make verify`. Required check names changed (see
+  CONTRIBUTING.md).
+- Checkov in `security.yml` also scans `examples/gitlab-ci/terraform/`.
+- The README follows the portfolio template; setup, repeatable checks, cost and teardown moved to
+  [docs/deploy-runbook.md](docs/deploy-runbook.md).
+- The HTTPS egress rule carries an inline Trivy exception with its reason (tasks reach ECR through NAT or a public
+  IP).
 
 Relative to the first draft of the lab:
 
