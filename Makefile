@@ -18,7 +18,7 @@ ZIZMOR    := $(UVX) zizmor==1.30.1
 
 ## verify: everything CI runs in the verify job, offline
 verify: test python terraform checkov shell dockerfile workflows
-	@echo "make verify: all checks passed"
+	@echo "verify: all checks passed"
 
 ## test: app unit tests, workflow rules, GitLab pipeline properties
 test:
