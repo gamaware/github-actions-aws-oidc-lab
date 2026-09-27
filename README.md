@@ -93,8 +93,8 @@ with a pipeline KMS key, and the artifact bucket expires them after 30 days. Whe
 
 ## Verify locally
 
-Prerequisites, with the versions CI uses: Python 3.13 with [uv](https://docs.astral.sh/uv/), Terraform 1.16.4 (from
-`infra/terraform/.terraform-version`; 1.9 or later works), tflint 0.61.0, shellharden 4.3.2, hadolint 2.15.1, and
+Prerequisites, with the versions CI uses: Python 3.13 with [uv](https://docs.astral.sh/uv/), Terraform 1.14.5 (from
+`infra/terraform/.terraform-version`; 1.11 or later works), tflint 0.61.0, shellharden 4.3.2, hadolint 2.15.1, and
 shellcheck (CI uses the runner's; 0.11.0 locally). No AWS account or credentials.
 
 ```bash

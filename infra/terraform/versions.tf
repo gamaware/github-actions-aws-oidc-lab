@@ -1,7 +1,7 @@
 terraform {
-  # CI pins the exact version in .terraform-version; 1.9 is the minimum for
-  # validations that refer to other variables.
-  required_version = ">= 1.9.0, < 2.0.0"
+  # CI pins the exact version in .terraform-version. Validations that refer to
+  # other variables need 1.9; 1.11 is the portfolio's common minimum.
+  required_version = ">= 1.11.0, < 2.0.0"
 
   required_providers {
     aws = {

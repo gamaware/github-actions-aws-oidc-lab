@@ -1,6 +1,6 @@
 terraform {
   # Same pins as infra/terraform, so one Terraform install covers every root.
-  required_version = ">= 1.9.0, < 2.0.0"
+  required_version = ">= 1.11.0, < 2.0.0"
 
   required_providers {
     aws = {
