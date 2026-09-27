@@ -1,4 +1,4 @@
-# ADR 0010: GitHub Actions vs CodePipeline: when to use each
+# 0010. GitHub Actions vs CodePipeline: when to use each
 
 ## Status
 
@@ -86,7 +86,7 @@ Automated, in `make verify`:
 - `tests/test_codepipeline_example.py` asserts that every buildspec phase aborts on failure, nothing runs in
   `post_build`, Trivy is pinned and checksum-verified, tests and the Trivy gate run before the push, and the deploy
   receives the image by digest.
-- Checkov scans `examples/codepipeline/terraform/` in `make verify` and in `security.yml`; its three skips are inline
+- Checkov scans `examples/codepipeline/terraform/` in `make verify` and in `security.yml`; its four skips are inline
   with their reasons.
 
 Manual: `make test-live-codepipeline` applies the deploy target and the pipeline to a sandbox account, runs the

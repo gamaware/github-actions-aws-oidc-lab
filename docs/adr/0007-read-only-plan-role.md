@@ -1,4 +1,4 @@
-# ADR 0007: A separate, optional, read-only role for terraform plan on pull requests
+# 0007. A separate, optional, read-only role for terraform plan on pull requests
 
 ## Status
 
@@ -52,3 +52,7 @@ Automated, in `infra/terraform/tests/iam.tftest.hcl`:
 ## Notes
 
 - Backend example: `infra/terraform/backend.tf.example` and `infra/terraform/backend.hcl.example`.
+- The plan role in `terraform-aws-rescue-lab` makes the opposite choice and may write lock files. There, an engineer
+  applies by hand during a state migration, so a plan that takes the lock fails fast instead of reading state in the
+  middle of an apply. Here, applies run from one workstation with the lock, and a pull request plan is review
+  evidence, so skipping the lock keeps the role read-only.

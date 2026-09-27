@@ -19,7 +19,7 @@ environment form. Any other job gets a `ref`, `pull_request` or tag form.
 | Deploy job on `main` with `environment: production` | `repo:OWNER/REPO:environment:production` | Allowed after the required reviewer approves |
 | Job on `main` without the environment, for example `build` in `deploy.yml` or the Scorecard job | `repo:OWNER/REPO:ref:refs/heads/main` | Denied by STS ([ADR 0002](adr/0002-environment-subject-only.md)) |
 | Workflow on a feature branch, no environment | `repo:OWNER/REPO:ref:refs/heads/feature-x` | Denied by STS |
-| Workflow on a feature branch that declares `environment: production` | `repo:OWNER/REPO:environment:production` | Blocked by GitHub only if the environment's deployment branches are limited to `main` (setup step 2 in the README) |
+| Workflow on a feature branch that declares `environment: production` | `repo:OWNER/REPO:environment:production` | Blocked by GitHub only if the environment's deployment branches are limited to `main` (step 2 of the [deploy runbook](deploy-runbook.md)) |
 | Pull request from a branch in this repository | `repo:OWNER/REPO:pull_request` | Denied by the deploy role. Accepted by the read-only plan role only if `create_plan_role = true` (see below) |
 | Pull request from a fork | `repo:OWNER/REPO:pull_request` | Denied by STS. On `pull_request`, GitHub gives fork PRs a read-only token and no `id-token: write`, unless a private repository enables sending write tokens to fork PR workflows |
 | Job in a different repository, even the same owner | `repo:OWNER/OTHER:...` | Denied by STS |

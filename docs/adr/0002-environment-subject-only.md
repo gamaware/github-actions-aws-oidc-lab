@@ -1,4 +1,4 @@
-# ADR 0002: Trust only the environment subject, not the branch subject
+# 0002. Trust only the environment subject, not the branch subject
 
 ## Status
 

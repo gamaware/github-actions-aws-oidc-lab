@@ -1,4 +1,4 @@
-# ADR 0009: Show the GitLab CI equivalent as a tested example, bound to the protected branch
+# 0009. Show the GitLab CI equivalent as a tested example, bound to the protected branch
 
 ## Status
 

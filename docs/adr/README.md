@@ -1,9 +1,9 @@
-# Architecture Decision Records
+# Architecture decision records
 
-Each record follows the format in *Fundamentals of Software Architecture* (2nd edition): title, status, context,
-decision, consequences, compliance (how the decision is checked, automated where possible) and notes.
+Architecture decision records follow the *Fundamentals of Software Architecture* (2nd ed.) format. The Compliance
+section says how each decision is checked, automated where possible.
 
-| ADR | Decision | Status |
+| Number | Title | Status |
 | --- | --- | --- |
 | [0001](0001-exact-subject-matching.md) | Match OIDC claims with StringEquals, never StringLike | Accepted |
 | [0002](0002-environment-subject-only.md) | Trust only the environment subject, not the branch subject | Accepted |

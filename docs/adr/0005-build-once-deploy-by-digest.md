@@ -1,4 +1,4 @@
-# ADR 0005: Build once, scan what ships, deploy by digest, verify after
+# 0005. Build once, scan what ships, deploy by digest, verify after
 
 ## Status
 

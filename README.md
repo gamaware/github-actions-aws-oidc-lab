@@ -1,17 +1,17 @@
-# GitHub Actions to AWS with OIDC, a least-privilege role and security gates
+# GitHub Actions to AWS with OIDC, a scoped deploy role and security gates
 
 Deploy a container to Amazon ECS on Fargate from CI with no stored AWS keys, a role that reaches one service, and
 gates that stop an unscanned image. GitHub Actions end to end, with the same deploy on GitLab CI and on AWS
 CodePipeline with CodeBuild as tested examples.
 
-[![ci](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/ci.yml)
-[![security](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/security.yml/badge.svg)](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/security.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Lab](https://img.shields.io/badge/type-lab-lightgrey.svg)
+[![CI](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/gamaware/github-actions-aws-oidc-lab/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+![Lab](https://img.shields.io/badge/type-lab-5b6b7f)
 
-![CI/CD deployment pipeline to AWS with GitHub Actions, GitLab or Jenkins](docs/assets/cover.png)
+![CI/CD pipeline to AWS](docs/assets/cover.png)
 
-> **Lab.** "Harbor Goods" is a fictional client. Account IDs are AWS documentation examples (`111122223333`).
+> **Lab.** Harbor Goods and all data here are fictional. Each repository in this portfolio is a
+> separate engagement with Harbor Goods, a fictional mid-size retailer. Account IDs are AWS documentation examples.
 
 ## What this proves
 
@@ -46,7 +46,8 @@ CodePipeline with CodeBuild as tested examples.
 
 ## Scenario and acceptance criteria
 
-Harbor Goods, a fictional mid-size retailer, deploys a small storefront service to ECS on Fargate. Today a CI secret
+Harbor Goods, a fictional mid-size retailer, deploys a small storefront service to ECS on Fargate in its production
+account (`111122223333`). Today a CI secret
 holds an IAM user's access key with broad permissions, and a pull request from any branch can run a job that uses
 it. The team uses GitHub for the storefront and GitLab for two internal tools, and wants one pattern for both.
 
@@ -109,7 +110,7 @@ Success! 7 passed, 0 failed.
 Success! 7 passed, 0 failed.
 ...
 No findings to report. Good job! (8 suppressed)
-make verify: all checks passed
+verify: all checks passed
 ```
 
 It takes about 30 seconds once tools and providers are cached. It runs pytest (52 tests), ruff, `terraform fmt`,
@@ -143,7 +144,9 @@ docs/                      threat notes, deploy runbook, Jenkins pattern
 
 ## Decisions and trade-offs
 
-| ADR | Decision | Status |
+Architecture decision records follow the *Fundamentals of Software Architecture* (2nd ed.) format.
+
+| Number | Title | Status |
 | --- | --- | --- |
 | [0001](docs/adr/0001-exact-subject-matching.md) | Match OIDC claims with StringEquals, never StringLike | Accepted |
 | [0002](docs/adr/0002-environment-subject-only.md) | Trust only the environment subject, not the branch subject | Accepted |
@@ -212,11 +215,10 @@ Branch protection on `main` requires these checks; the command that applies them
 
 ## Related work
 
+- [CI/CD pipeline to AWS on Upwork](https://www.upwork.com/freelancers/~014b3520cf9e140103). This lab is the
+  pattern that service delivers on a client's own repository and account.
 - [AWS DevOps portfolio](https://github.com/gamaware/aws-devops-portfolio): the index of every lab and sample
   deliverable.
-- Upwork service: "CI/CD deployment pipeline to AWS with GitHub Actions, GitLab or Jenkins". This lab is the
-  pattern that service delivers on a client's own repository and account.
-- The method is the one Alex uses in audits for ITESO and freelance clients in Guadalajara.
 
 ## License
 

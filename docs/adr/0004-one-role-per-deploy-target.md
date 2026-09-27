@@ -1,4 +1,4 @@
-# ADR 0004: One OIDC role per deploy target
+# 0004. One OIDC role per deploy target
 
 ## Status
 

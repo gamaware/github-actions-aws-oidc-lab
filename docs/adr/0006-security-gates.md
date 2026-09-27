@@ -1,4 +1,4 @@
-# ADR 0006: Semgrep, Trivy and Checkov as required checks, with SARIF in code scanning
+# 0006. Semgrep, Trivy and Checkov as required checks, with SARIF in code scanning
 
 ## Status
 

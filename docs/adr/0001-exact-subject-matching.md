@@ -1,4 +1,4 @@
-# ADR 0001: Match OIDC claims with StringEquals, never StringLike
+# 0001. Match OIDC claims with StringEquals, never StringLike
 
 ## Status
 

@@ -1,9 +1,9 @@
 # Changelog
 
-All notable changes to this lab. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
-the project uses [Semantic Versioning](https://semver.org/).
+This file records all notable changes to this lab. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [Unreleased]
 
 ### Added
 
@@ -27,10 +27,9 @@ the project uses [Semantic Versioning](https://semver.org/).
 - Terraform outputs for the GitLab example and a `tags` variable.
 - Social preview (`docs/assets/social-preview.png`, 1280x640) rendered from `docs/assets/social-preview.json`
   with the shared generator.
-- Context and deployment diagrams with official AWS icons, the cover image, a deploy runbook, `CLAUDE.md`, editor
-  hooks in `.claude/`, `.editorconfig`, `.coderabbit.yaml`, Copilot review instructions, Vale configuration and a weekly
+- Context and deployment diagrams with official AWS icons, the cover image, a deploy runbook, editor hooks,
+  `.editorconfig`, `.coderabbit.yaml`, Copilot review instructions, Vale configuration and a weekly
   pre-commit hook update workflow (needs the `PRE_COMMIT_PAT` secret in an `automation` environment).
-
 - The lab: a GitHub OIDC provider, a deploy role scoped to one ECR repository and one ECS service, a Fargate
   service, pull request CI with no cloud access, and threat notes.
 - Security gates as required checks with SARIF in code scanning: Semgrep on code, Trivy on the image, Checkov on
@@ -56,6 +55,11 @@ the project uses [Semantic Versioning](https://semver.org/).
   `secrets`, `container` and `security`, so the required check names match the other portfolio repositories (see the
   README's gates table).
 - Checkov in `security.yml` also scans `examples/gitlab-ci/terraform/`.
+- Trivy runs from the checksum-verified release binary (0.74.0) in `deploy.yml` and `security.yml`, not from the
+  Trivy action.
+- Terraform is pinned to 1.14.5 in each root's `.terraform-version`; every root requires 1.11 or later.
+- ADRs use the `# NNNN. Title` heading; `SECURITY.md` points to the shared policy; `make verify` ends with
+  `verify: all checks passed`.
 - The README follows the portfolio template; setup, repeatable checks, cost and teardown moved to
   [docs/deploy-runbook.md](docs/deploy-runbook.md).
 - The HTTPS egress rule carries an inline Trivy exception with its reason (tasks reach ECR through NAT or a public

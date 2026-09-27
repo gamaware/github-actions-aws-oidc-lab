@@ -1,4 +1,4 @@
-# ADR 0008: Test IAM policies offline with terraform test and a mocked provider
+# 0008. Test IAM policies offline with terraform test and a mocked provider
 
 ## Status
 
@@ -35,7 +35,7 @@ Test the rendered policies, not the Terraform code, with `terraform test` and `m
 
 ## Compliance
 
-`Terraform fmt, validate, test and tflint` is a required check. Each assertion's error message names the property
+`make verify` (the required `verify` check) runs these tests. Each assertion's error message names the property
 it protects.
 
 ## Notes

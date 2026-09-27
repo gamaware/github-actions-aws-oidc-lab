@@ -1,4 +1,4 @@
-# ADR 0003: No ECS task role; the execution role only pulls and logs
+# 0003. No ECS task role; the execution role only pulls and logs
 
 ## Status
 
