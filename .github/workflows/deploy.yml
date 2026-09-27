@@ -34,10 +34,25 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
     env:
       ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+      TRIVY_VERSION: "0.74.0"
+      TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # Trivy from the release archive, checked against a pinned checksum
+      # (the same version and checksum as the shared container workflow).
+      - name: Install Trivy
+        run: |
+          set -euo pipefail
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${archive}"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/bin" trivy
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -60,20 +75,12 @@ jobs:
           tar -xf image.tar -C oidc-lab-oci
 
       - name: Trivy gate on the archive that ships
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          input: oidc-lab-oci
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
+        run: >-
+          trivy image --input oidc-lab-oci --no-progress
+          --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1
 
       - name: SBOM (CycloneDX)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          input: oidc-lab-oci
-          format: cyclonedx
-          output: sbom.cdx.json
-          skip-setup-trivy: true
+        run: trivy image --input oidc-lab-oci --no-progress --format cyclonedx --output sbom.cdx.json
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

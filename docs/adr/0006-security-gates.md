@@ -18,13 +18,14 @@ The `security` workflow runs three jobs on every pull request, on every push to 
 | --- | --- | --- | --- |
 | `Semgrep (code)` | Semgrep, rulesets `p/python`, `p/dockerfile`, `p/github-actions`, `p/terraform`, `p/secrets` | whole repository | any finding |
 | `Trivy (image)` | Trivy | the built image | HIGH or CRITICAL with a released fix (`ignore-unfixed`) |
-| `Checkov (infra)` | Checkov | `infra/terraform/` and `examples/gitlab-ci/terraform/` | any failed check without an inline skip |
+| `Checkov (infra)` | Checkov | `infra/terraform/`, `examples/gitlab-ci/terraform/` and `examples/codepipeline/terraform/` | any failed check without an inline skip |
 
 Each job uploads SARIF to GitHub code scanning with its own category, even when the gate fails. The three check
 names are required status checks on `main`, next to the `ci` workflow's `make verify` and
 the shared checks it calls (see CONTRIBUTING.md).
 
-Tool versions are pinned (`semgrep==1.178.0`, `checkov==3.3.19`, the Trivy action by commit SHA). Rulesets are named
+Tool versions are pinned (`semgrep==1.178.0`, `checkov==3.3.19`, Trivy 0.74.0 installed from the release archive
+after a SHA-256 check, as the shared `gamaware/.github` workflows do). Rulesets are named
 explicitly instead of `--config auto`, so the rules do not depend on detection and metrics stay off.
 
 ## Consequences
