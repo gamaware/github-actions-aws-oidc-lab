@@ -1,0 +1,12 @@
+aws_region          = "us-east-1"
+gitlab_project_path = "harbor-goods/storefront"
+
+# From `terraform output` in infra/terraform (deploy target already created there).
+ecr_repository_arn     = "arn:aws:ecr:us-east-1:111122223333:repository/oidc-lab"
+ecs_cluster_arn        = "arn:aws:ecs:us-east-1:111122223333:cluster/oidc-lab"
+ecs_service_arn        = "arn:aws:ecs:us-east-1:111122223333:service/oidc-lab/oidc-lab"
+execution_role_arn     = "arn:aws:iam::111122223333:role/oidc-lab-task-execution"
+task_definition_family = "oidc-lab"
+
+# Self-managed GitLab:
+# gitlab_url = "https://gitlab.example.com"

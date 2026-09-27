@@ -135,3 +135,9 @@ variable "state_key" {
   type        = string
   default     = "github-actions-aws-oidc-lab/terraform.tfstate"
 }
+
+variable "tags" {
+  description = "Extra tags for every resource. make test-live sets purpose = portfolio-test."
+  type        = map(string)
+  default     = {}
+}

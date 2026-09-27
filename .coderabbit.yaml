@@ -1,0 +1,27 @@
+language: en-US
+reviews:
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "infra/terraform/policies/**"
+      instructions: >-
+        Trust and permission policies. Flag any wildcard in an OIDC subject or audience, any StringLike on
+        token claims, any new action or Resource "*" without a matching assertion in
+        infra/terraform/tests/iam.tftest.hcl.
+    - path: "examples/gitlab-ci/**"
+      instructions: >-
+        GitLab CI example of the same deploy. The AWS role must trust only the exact project_path and
+        protected ref subject, the id token audience must be sts.amazonaws.com, and no AWS keys may appear
+        as CI variables. Check that tests/test_gitlab_example.py still covers any change.
+    - path: ".github/workflows/**"
+      instructions: >-
+        permissions: {} at the top and per-job grants, actions pinned to full SHAs with a version comment,
+        no pull_request_target, event data passed through env, no id-token on pull request workflows.
+    - path: "**/*.sh"
+      instructions: >-
+        Must pass shellcheck and shellharden. Quote every variable; use arrays for word splitting.
+    - path: "**/*.md"
+      instructions: >-
+        Line length 120 (tables exempt), English, dateless, placeholders or AWS documentation example IDs
+        only, no marketing adjectives.

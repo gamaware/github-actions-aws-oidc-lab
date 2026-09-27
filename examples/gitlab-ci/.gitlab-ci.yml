@@ -1,0 +1,135 @@
+# The same deploy as .github/workflows/deploy.yml, on GitLab CI.
+#
+# Build once, scan what ships, deploy by digest, verify after:
+#   test    unit tests, no AWS access
+#   build   builds the image once as an OCI archive and records its digest
+#   scan    Trivy gate on that archive: fixable HIGH and CRITICAL findings fail the pipeline
+#   deploy  manual, main only: gets a GitLab ID token with the sts.amazonaws.com
+#           audience, assumes the deploy role through OIDC, pushes the scanned
+#           archive, checks the digest, deploys image@sha256 to ECS and runs
+#           scripts/verify-deployment.sh
+#
+# No AWS keys are stored in CI/CD variables. Only the deploy job declares
+# id_tokens, so it is the only job that can ask STS for credentials.
+# See docs/adr/0009-gitlab-ci-example.md.
+#
+# Project CI/CD variables (none of them is a secret):
+#   AWS_ROLE_ARN, AWS_REGION, ECR_REPOSITORY_URL, ECS_CLUSTER, ECS_SERVICE,
+#   ECS_TASK_FAMILY, and optionally APP_URL.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+stages: [test, build, scan, deploy]
+
+default:
+  interruptible: true
+
+unit-tests:
+  stage: test
+  image: python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
+  timeout: 10m
+  script:
+    - python -m pip install --requirement app/requirements-dev.txt
+    - python -m pytest -q app/tests
+
+build-image:
+  stage: build
+  image: docker:29-cli@sha256:018edbc908e08fcc9dbf029c812c34251e9b4719e6f71ca0e5eae2a987d014ca
+  services:
+    - name: docker:29-dind@sha256:3f3c01aaaebf7cce837356b688b7c059a4749f10bd7660dec7c58fc454a283f0
+      alias: docker
+  timeout: 20m
+  variables:
+    DOCKER_TLS_CERTDIR: /certs
+  script:
+    # buildx refuses TLS settings from the environment; a context carries them.
+    - docker context create tls-env
+    - docker buildx create --use --driver docker-container tls-env
+    # No BuildKit provenance or SBOM: they would wrap the manifest in an index,
+    # and ECS would run a different digest than the one scanned.
+    - >-
+      docker buildx build app
+      --provenance=false --sbom=false
+      --output type=oci,dest=image.tar
+      --metadata-file metadata.json
+    - |
+      DIGEST="$(sed -n 's/.*"containerimage.digest": *"\(sha256:[0-9a-f]\{64\}\)".*/\1/p' metadata.json)"
+      test -n "$DIGEST" || { echo "No image digest in build metadata."; exit 1; }
+      echo "DIGEST=$DIGEST" > build.env
+  artifacts:
+    paths: [image.tar]
+    reports:
+      dotenv: build.env
+    expire_in: 1 day
+
+scan-image:
+  stage: scan
+  image:
+    name: aquasec/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c
+    entrypoint: [""]
+  timeout: 15m
+  needs: [build-image]
+  script:
+    # Trivy reads an OCI image as a layout directory, not as a tar.
+    - mkdir oci && tar -xf image.tar -C oci
+    - trivy image --input oci --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+
+deploy-production:
+  stage: deploy
+  image:
+    name: quay.io/skopeo/stable:v1.20@sha256:47853bb9fb24202af9110531ebd6e43c5f97701254ca290596640290d17942f4
+    entrypoint: [""]
+  timeout: 30m
+  needs: [build-image, scan-image]
+  interruptible: false
+  resource_group: production
+  environment:
+    name: production
+    deployment_tier: production
+  rules:
+    # Manual, and only on the protected default branch: the role trusts only
+    # the subject project_path:<group>/<project>:ref_type:branch:ref:main.
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+  id_tokens:
+    AWS_ID_TOKEN:
+      aud: sts.amazonaws.com
+  script:
+    - dnf -q install -y awscli2 jq
+    # With AWS_ROLE_ARN (a project variable), these two variables make the AWS
+    # CLI exchange the token for role credentials. The token file lives only
+    # in this job.
+    - export AWS_WEB_IDENTITY_TOKEN_FILE="$(mktemp)"
+    - printf '%s' "$AWS_ID_TOKEN" > "$AWS_WEB_IDENTITY_TOKEN_FILE"
+    - export AWS_ROLE_SESSION_NAME="gl-${CI_PIPELINE_ID}-${CI_JOB_ID}"
+    - >-
+      aws ecr get-login-password --region "$AWS_REGION" |
+      skopeo login --username AWS --password-stdin "${ECR_REPOSITORY_URL%%/*}"
+    # skopeo copies the archive byte for byte, so the registry digest is the
+    # one Trivy scanned. Tags are immutable; the job ID keeps retries unique.
+    - TAG="${CI_COMMIT_SHA}-${CI_JOB_ID}"
+    - skopeo copy --preserve-digests oci-archive:image.tar "docker://${ECR_REPOSITORY_URL}:${TAG}"
+    - PUSHED="$(skopeo inspect --format '{{.Digest}}' "docker://${ECR_REPOSITORY_URL}:${TAG}")"
+    - test "$PUSHED" = "$DIGEST" || { echo "Registry digest $PUSHED differs from built digest $DIGEST."; exit 1; }
+    - >-
+      aws ecs describe-task-definition --task-definition "$ECS_TASK_FAMILY" --query taskDefinition |
+      jq --arg image "${ECR_REPOSITORY_URL}@${DIGEST}" --arg version "$CI_COMMIT_SHA"
+      '(.containerDefinitions[] | select(.name == "app")) |= (.image = $image
+        | .environment = ([.environment[]? | select(.name != "APP_VERSION")] + [{name: "APP_VERSION", value: $version}]))
+      | {family, taskRoleArn, executionRoleArn, networkMode, containerDefinitions, volumes, placementConstraints,
+         requiresCompatibilities, cpu, memory, runtimePlatform}
+      | with_entries(select(.value != null))' > task-definition.json
+    - >-
+      EXPECTED_TASK_DEFINITION="$(aws ecs register-task-definition --cli-input-json file://task-definition.json
+      --query taskDefinition.taskDefinitionArn --output text)"
+    - >-
+      aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE"
+      --task-definition "$EXPECTED_TASK_DEFINITION" > /dev/null
+    - aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+    # "Stable" also happens after a circuit-breaker rollback; the script checks
+    # that the new revision is PRIMARY and its tasks are healthy on this digest.
+    - export EXPECTED_TASK_DEFINITION EXPECTED_IMAGE_DIGEST="$DIGEST" EXPECTED_VERSION="$CI_COMMIT_SHA"
+    - ./scripts/verify-deployment.sh

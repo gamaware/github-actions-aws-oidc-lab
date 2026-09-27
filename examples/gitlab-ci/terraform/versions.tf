@@ -1,6 +1,5 @@
 terraform {
-  # CI pins the exact version in .terraform-version; 1.9 is the minimum for
-  # validations that refer to other variables.
+  # Same pins as infra/terraform, so one Terraform install covers both roots.
   required_version = ">= 1.9.0, < 2.0.0"
 
   required_providers {
@@ -15,7 +14,7 @@ provider "aws" {
   region = var.aws_region
 
   default_tags {
-    tags = merge({ Purpose = "personal-lab" }, var.tags, {
+    tags = merge(var.tags, {
       Project   = var.name
       ManagedBy = "terraform"
     })
