@@ -130,6 +130,11 @@ run "build_pushes_and_deploy_uses_the_ecs_action" {
   }
 
   assert {
+    condition     = aws_codebuild_project.build.environment[0].image == "aws/codebuild/standard:7.0" && aws_codebuild_project.verify.environment[0].image == "aws/codebuild/standard:7.0"
+    error_message = "Both CodeBuild projects must run on aws/codebuild/standard:7.0, which provides the buildspec's Python runtime."
+  }
+
+  assert {
     condition     = aws_codebuild_project.build.environment[0].privileged_mode && !aws_codebuild_project.verify.environment[0].privileged_mode
     error_message = "Only the build project, which runs docker build, may be privileged."
   }
@@ -248,6 +253,14 @@ run "roles_name_every_action_and_scope_their_resources" {
   assert {
     condition     = one([for s in jsondecode(aws_iam_role_policy.pipeline.policy).Statement : s.Resource if s.Sid == "EcsUpdateOneService"]) == var.ecs_service_arn
     error_message = "The pipeline may update one ECS service only."
+  }
+
+  assert {
+    condition = one([
+      for s in jsondecode(aws_iam_role_policy.pipeline.policy).Statement : s.Condition.StringEquals["ecs:CreateAction"]
+      if s.Sid == "EcsTagNewRevisions"
+    ]) == "RegisterTaskDefinition"
+    error_message = "ecs:TagResource must be limited to tagging a task definition revision as it is registered."
   }
 
   assert {

@@ -47,6 +47,11 @@ def test_every_phase_aborts_on_failure(build, verify):
             assert phase.get("on-failure") == "ABORT", name
 
 
+def test_build_selects_python_313(build):
+    # aws/codebuild/standard:7.0 offers Python 3.13; the Terraform test pins that image.
+    assert str(build["phases"]["install"]["runtime-versions"]["python"]) == "3.13"
+
+
 def test_nothing_runs_in_post_build(build, verify):
     # CodeBuild runs post_build even after a failed build phase.
     assert "post_build" not in build["phases"]
