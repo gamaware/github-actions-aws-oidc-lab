@@ -16,6 +16,7 @@ section says how each decision is checked, automated where possible.
 | [0009](0009-gitlab-ci-example.md) | Show the GitLab CI equivalent as a tested example, bound to the protected branch | Accepted |
 | [0010](0010-github-actions-vs-codepipeline.md) | GitHub Actions vs CodePipeline: when to use each | Accepted |
 | [0011](0011-plan-workflow-as-example.md) | Ship the pull request plan workflow as a client-installed example | Accepted |
+| [0012](0012-live-tests-run-private-only.md) | Live tests run private-only | Accepted |
 
 To add a record, copy the section headings of an existing one, take the next number, and link it here. A decision
 that changes an accepted one gets a new record that says which one it supersedes.

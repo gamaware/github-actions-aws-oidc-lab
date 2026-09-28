@@ -18,7 +18,10 @@ GitLab's OIDC tokens. Everything is verified offline; nothing in `make verify` c
   `.github/workflows/`, so no pull request here gets an OIDC token.
 - `tests/`: repository-level tests (workflow and pipeline properties).
 - `scripts/`: `verify-deployment.sh` (used by every pipeline), `test-live.sh` and `test-live-codepipeline.sh`
-  (manual, real AWS).
+  (manual, real AWS), and `check_private_plan.py`, their pre-flight (copied unchanged across the portfolio).
+- `tests/live/`: the private network root the live tests use and `deploy-target.tfvars.json`, the only place the
+  live deploy target's `assign_public_ip` and `ingress_cidr_blocks` are set. Live tests stay private-only
+  (`docs/live-test.md`).
 - `docs/adr/`, `docs/diagrams/` (`.drawio` source plus exported PNG), `docs/threat-notes.md`,
   `docs/deploy-runbook.md`, `docs/jenkins-pattern.md`.
 

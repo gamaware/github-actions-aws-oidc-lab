@@ -7,6 +7,11 @@ This file records all notable changes to this lab. The format follows
 
 ### Added
 
+- Private-only live tests: both `make test-live` targets run in a dedicated VPC from `tests/live/terraform/` with no
+  internet or NAT gateway and VPC endpoints for ECR, S3 and CloudWatch Logs; tasks get no public IP. Each plan passes
+  `scripts/check_private_plan.py` before it is applied. Offline tests (`tests/test_check_private_plan.py`,
+  `tests/live/terraform/tests/private_only.tftest.hcl`, `tests/test_live_config.py`) run in `make verify`
+  ([ADR 0012](docs/adr/0012-live-tests-run-private-only.md), [docs/live-test.md](docs/live-test.md)).
 - AWS-native path in `examples/codepipeline/`: a CodePipeline V2 (Source through CodeConnections or S3, CodeBuild
   test, Trivy gate and push by digest, manual approval, ECS deploy action, CodeBuild verify), buildspecs, a pipeline
   KMS key for artifacts and build logs, an artifact bucket with a lifecycle rule and a TLS-only policy, and separate

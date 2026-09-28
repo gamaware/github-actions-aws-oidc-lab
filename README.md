@@ -108,20 +108,24 @@ Expected output ends with:
 Success! 7 passed, 0 failed.
 Success! 7 passed, 0 failed.
 Success! 7 passed, 0 failed.
+Success! 3 passed, 0 failed.
 ...
-No findings to report. Good job! (8 suppressed)
+No findings to report. Good job! (7 suppressed)
 verify: all checks passed
 ```
 
-It takes about 30 seconds once tools and providers are cached. It runs pytest (52 tests), ruff, `terraform fmt`,
-`validate`, mocked `terraform test` and tflint on the three Terraform roots, Checkov, shellcheck, shellharden, hadolint,
-actionlint and zizmor. `make image` adds the Trivy image gate (needs Docker) and `make semgrep` the Semgrep rulesets.
+It takes about 30 seconds once tools and providers are cached. It runs pytest (66 tests), ruff, `terraform fmt`,
+`validate`, mocked `terraform test` and tflint on the four Terraform roots (the fourth is the live-test network),
+Checkov, shellcheck, shellharden, hadolint, actionlint and zizmor. `make image` adds the Trivy image gate (needs
+Docker) and `make semgrep` the Semgrep rulesets.
 
 `make test-live` is optional and manual. It applies the GitHub and GitLab Terraform roots to a sandbox account, checks
 the roles with the IAM policy simulator and always destroys what it created; see
 [deploy-runbook.md](docs/deploy-runbook.md#automated-live-check). `make test-live-codepipeline` does the same for the
-CodePipeline path and also runs the pipeline end to end, approval included. To deploy the lab end to end from your own fork,
-follow the same runbook.
+CodePipeline path and also runs the pipeline end to end, approval included. Both run private-only: a dedicated VPC
+with no internet path, no public IPs, and a pre-flight that refuses any plan with an internet-facing resource before
+it is applied ([docs/live-test.md](docs/live-test.md)). To deploy the lab end to end from your own fork, follow the
+same runbook.
 
 ## Repository map
 
@@ -133,14 +137,15 @@ infra/terraform/tests/     terraform test with a mocked provider
 examples/gitlab-ci/        .gitlab-ci.yml and a Terraform root for the GitLab OIDC role, with tests
 examples/codepipeline/     buildspecs and a Terraform root for CodePipeline, CodeBuild and their roles, with tests
 examples/workflows/        plan.yml: a read-only terraform plan on pull requests, for a client to install
-tests/                     pytest: workflow hardening rules, GitLab pipeline and buildspec properties
+tests/                     pytest: workflow hardening rules, GitLab pipeline and buildspec properties, live-test guards
+tests/live/                private network root and deploy-target settings for the live tests, with terraform test
 scripts/                   verify-deployment.sh (every pipeline), test-live.sh and test-live-codepipeline.sh
-                           (manual, real AWS)
+                           (manual, real AWS), check_private_plan.py (their pre-flight)
 .github/workflows/         ci (make verify + shared checks), security (SARIF gates), deploy, scorecard,
                            update-pre-commit-hooks
 docs/adr/                  architecture decision records
 docs/diagrams/             context, deployment and CodePipeline diagrams (.drawio source, .png export)
-docs/                      threat notes, deploy runbook, Jenkins pattern
+docs/                      threat notes, deploy runbook, live tests, Jenkins pattern
 ```
 
 ## Decisions and trade-offs
@@ -160,6 +165,7 @@ Architecture decision records follow the *Fundamentals of Software Architecture*
 | [0009](docs/adr/0009-gitlab-ci-example.md) | Show the GitLab CI equivalent as a tested example, bound to the protected branch | Accepted |
 | [0010](docs/adr/0010-github-actions-vs-codepipeline.md) | GitHub Actions vs CodePipeline: when to use each | Accepted |
 | [0011](docs/adr/0011-plan-workflow-as-example.md) | Ship the pull request plan workflow as a client-installed example | Accepted |
+| [0012](docs/adr/0012-live-tests-run-private-only.md) | Live tests run private-only | Accepted |
 
 ## Security and quality gates
 

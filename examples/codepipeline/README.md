@@ -57,9 +57,10 @@ with a mocked provider, Checkov and tflint on the root, and
 [tests/test_codepipeline_example.py](../../tests/test_codepipeline_example.py) on the buildspecs. None of them calls
 AWS.
 
-`make test-live-codepipeline` is manual. It applies `infra/terraform` and this root to the AWS CLI profile `dev` with
-an S3 source, runs the pipeline end to end, approves it, checks the three roles with the IAM policy simulator, and
-destroys both stacks on exit.
+`make test-live-codepipeline` is manual. It applies a private live network, `infra/terraform` and this root to the
+AWS CLI profile `dev` with an S3 source, runs the pipeline end to end, approves it, checks the three roles with the
+IAM policy simulator, and destroys everything on exit. The task runs with no public IP in a VPC with no internet path,
+and each plan passes a private-only pre-flight before it is applied ([docs/live-test.md](../../docs/live-test.md)).
 
 ## Limits
 

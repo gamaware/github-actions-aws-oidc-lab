@@ -128,18 +128,23 @@ stack; delete it separately.
 
 ## Automated live check
 
-`make test-live` does a smaller version of this runbook without GitHub: it applies both Terraform roots to the AWS
-CLI profile `dev` (override with `AWS_PROFILE_LIVE`), asks the IAM policy simulator whether each deploy role can
-push to its repository, update its service and pass only the execution role to ECS, and cannot do the same next to
-them. It destroys both stacks on exit, even after a failure, and fails if anything tagged `purpose=portfolio-test`
-remains. It shows the caller identity and asks for confirmation before creating anything. Its output is never
-committed.
+`make test-live` does a smaller version of this runbook without GitHub: it applies a private live network and both
+Terraform roots to the AWS CLI profile `dev` (override with `AWS_PROFILE_LIVE`), asks the IAM policy simulator
+whether each deploy role can push to its repository, update its service and pass only the execution role to ECS, and
+cannot do the same next to them. It destroys both stacks and the network on exit, even after a failure, and fails
+if anything tagged `purpose=portfolio-test` remains. It shows the caller identity and asks for confirmation before
+creating anything. Its output is never committed.
 
-`make test-live-codepipeline` covers the CodePipeline path the same way: it applies `infra/terraform` (one task, a
-public IP, no inbound rule) and `examples/codepipeline/terraform` with an S3 source, uploads `git archive HEAD`,
+`make test-live-codepipeline` covers the CodePipeline path the same way: it applies the private live network with
+VPC endpoints, `infra/terraform` (one task, no public IP, no inbound rule) and `examples/codepipeline/terraform` with
+an S3 source, uploads `git archive HEAD`,
 runs the pipeline, approves it, waits for Deploy and Verify, checks the pipeline, build and verify roles with the
-IAM policy simulator, then deregisters the revisions the pipeline registered and destroys both stacks. It takes about
-15 minutes and builds only committed files.
+IAM policy simulator, then deregisters the revisions the pipeline registered and destroys both stacks and the network.
+It takes about 15 minutes and builds only committed files.
+
+Both run private-only: a dedicated VPC with no internet or NAT gateway, no public IPs, no inbound rule from the
+internet, and a pre-flight that checks each Terraform plan with `scripts/check_private_plan.py` before it is applied.
+See [live-test.md](live-test.md).
 
 ## Variants
 
