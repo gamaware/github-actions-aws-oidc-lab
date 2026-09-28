@@ -71,3 +71,33 @@ inside the task. The CodePipeline Verify stage runs `scripts/verify-deployment.s
 health through the ECS API: the PRIMARY deployment's task definition and rollout state, and the tasks' `RUNNING` and
 `HEALTHY` status and image digest. The script then reads the deployed image through `ecs describe-services` and
 `ecs describe-task-definition`.
+
+## Accounts with tag-enforcement SCPs
+
+Some accounts deny creates that lack required tags. Pass them at run time with `TEST_LIVE_EXTRA_TAGS`, a
+comma-separated list of `key=value` pairs that both scripts add to every resource; never commit the values:
+
+```bash
+TEST_LIVE_EXTRA_TAGS="Owner=you@example.com,Team=platform" make test-live
+```
+
+The account's policy simulator results then include its SCPs, so an action the deploy roles must not perform can
+come back as `explicitDeny` instead of `implicitDeny`. The scripts count both as denied.
+
+### CodePipeline under a tag SCP
+
+In the maintainer's sandbox, the tag-enforcement SCP denies `codepipeline:CreatePipeline` with an explicit deny
+even when the request carries every required tag: a debug trace of the create showed `Team`, `Owner`, `purpose`,
+`Project` and `ManagedBy` in the request body. `make test-live-codepipeline` therefore stops at the pipeline apply
+there, after the network and deploy target were checked and applied, and tears everything down. It is not run in
+that account.
+
+The CodePipeline path is covered offline instead:
+
+- `examples/codepipeline/terraform/tests/codepipeline.tftest.hcl`: stage order with the approval before deploy, the
+  `aws/codebuild/standard:7.0` image, the ECS deploy action, encryption, and each role's actions and resources,
+  including `codeconnections:UseConnection` on the connection only and `ecs:TagResource` only for new task
+  definition revisions.
+- `tests/test_codepipeline_example.py`: the buildspecs' properties, including `python: 3.13`.
+
+`make test-live` does not create a pipeline and runs in that account.
