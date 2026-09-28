@@ -108,13 +108,47 @@ def _allows_anyone(policy: Any) -> bool:
 
 
 def _limits_callers(condition: Any) -> bool:
+    """True when a Condition ties the statement to concrete, known callers.
+
+    Negated, Null and IfExists operators let callers without the key through. A wildcard value ("*" or "?") matches
+    anyone, and "anonymous" is the value aws:PrincipalAccount takes for unsigned requests. ForAllValues is true when
+    the key is absent, so it counts only alongside a Null check that requires the key.
+    """
     if not isinstance(condition, dict):
         return False
-    return any(
-        isinstance(block, dict) and any(key.lower() in RESTRICTING_CONDITION_KEYS for key in block)
-        for operator, block in condition.items()
-        # Negated, Null and IfExists operators let callers without the key through.
-        if "Not" not in operator and operator != "Null" and not operator.endswith("IfExists")
+    required = _required_keys(condition)
+    for operator, block in condition.items():
+        if not isinstance(operator, str) or not isinstance(block, dict):
+            continue
+        if "Not" in operator or operator == "Null" or operator.endswith("IfExists"):
+            continue
+        for key, value in block.items():
+            name = key.lower() if isinstance(key, str) else ""
+            if name not in RESTRICTING_CONDITION_KEYS or not _concrete(value):
+                continue
+            if operator.startswith("ForAllValues:") and name not in required:
+                continue
+            return True
+    return False
+
+
+def _required_keys(condition: dict[str, Any]) -> set[str]:
+    """Condition keys a Null operator requires to be present ("false" means the key must exist)."""
+    block = condition.get("Null")
+    if not isinstance(block, dict):
+        return set()
+    return {key.lower() for key, value in block.items() if isinstance(key, str) and _is_false(value)}
+
+
+def _is_false(value: Any) -> bool:
+    return all(v is False or (isinstance(v, str) and v.lower() == "false") for v in _as_list(value))
+
+
+def _concrete(value: Any) -> bool:
+    """A non-empty list of literal values, none a wildcard pattern and none "anonymous"."""
+    values = _as_list(value)
+    return bool(values) and all(
+        isinstance(v, str) and v and "*" not in v and "?" not in v and v.lower() != "anonymous" for v in values
     )
 
 

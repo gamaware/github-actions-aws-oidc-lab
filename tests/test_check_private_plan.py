@@ -83,6 +83,34 @@ NOT_ACCOUNT_READ = json.dumps(
         ]
     }
 )
+
+
+def allow_anyone(condition):
+    """An Allow to any principal for s3:GetObject, limited only by the given Condition."""
+    statement = {"Effect": "Allow", "Principal": "*", "Action": "s3:GetObject", "Condition": condition}
+    return json.dumps({"Statement": [statement]})
+
+
+ORG_PATHS_READ = allow_anyone(
+    {
+        "ForAllValues:StringEquals": {"aws:PrincipalOrgPaths": ["o-exampleorgid/r-ab12/ou-ab12-11111111/"]},
+        "Null": {"aws:PrincipalOrgPaths": "false"},
+    }
+)
+ANONYMOUS_READ = allow_anyone({"StringEquals": {"aws:PrincipalAccount": "anonymous"}})
+ANONYMOUS_IN_LIST_READ = allow_anyone({"StringEquals": {"aws:PrincipalAccount": ["111122223333", "Anonymous"]}})
+WILDCARD_ACCOUNT_READ = allow_anyone({"StringLike": {"aws:PrincipalAccount": "*"}})
+WILDCARD_ARN_READ = allow_anyone({"ArnLike": {"aws:PrincipalArn": "arn:aws:iam::?????????????:*"}})
+EMPTY_VALUES_READ = allow_anyone({"StringEquals": {"aws:PrincipalOrgID": []}})
+BARE_FOR_ALL_VALUES_READ = allow_anyone(
+    {"ForAllValues:StringEquals": {"aws:PrincipalOrgPaths": ["o-exampleorgid/r-ab12/ou-ab12-11111111/"]}}
+)
+FOR_ALL_VALUES_OPTIONAL_READ = allow_anyone(
+    {
+        "ForAllValues:StringEquals": {"aws:PrincipalOrgPaths": ["o-exampleorgid/r-ab12/ou-ab12-11111111/"]},
+        "Null": {"aws:PrincipalOrgPaths": "true"},
+    }
+)
 OPEN_PULL = json.dumps({"Statement": {"Effect": "Allow", "Principal": {"AWS": ["*"]}, "Action": "ecr:BatchGetImage"}})
 
 PRIVATE = plan(
@@ -99,6 +127,7 @@ PRIVATE = plan(
     ("aws_s3_bucket_policy", "tls", {"policy": DENY_INSECURE}, None),
     ("aws_ecr_repository_policy", "pull", {"policy": ACCOUNT_PULL}, None),
     ("aws_s3_bucket_policy", "org", {"policy": ORG_READ}, None),
+    ("aws_s3_bucket_policy", "org_paths", {"policy": ORG_PATHS_READ}, None),
     ("aws_route_table", "empty", {"route": []}, {"route": []}),
 )
 
@@ -147,6 +176,17 @@ class InternetFacing(unittest.TestCase):
         "public S3 bucket policy": ("aws_s3_bucket_policy", {"policy": OPEN_READ}, None),
         "public policy with a transport condition": ("aws_s3_bucket_policy", {"policy": TLS_ONLY_READ}, None),
         "public policy with a negated condition": ("aws_s3_bucket_policy", {"policy": NOT_ACCOUNT_READ}, None),
+        "public policy for anonymous callers": ("aws_s3_bucket_policy", {"policy": ANONYMOUS_READ}, None),
+        "public policy listing anonymous": ("aws_s3_bucket_policy", {"policy": ANONYMOUS_IN_LIST_READ}, None),
+        "public policy with a wildcard account": ("aws_s3_bucket_policy", {"policy": WILDCARD_ACCOUNT_READ}, None),
+        "public policy with a wildcard ARN": ("aws_s3_bucket_policy", {"policy": WILDCARD_ARN_READ}, None),
+        "public policy with no condition values": ("aws_s3_bucket_policy", {"policy": EMPTY_VALUES_READ}, None),
+        "public policy with bare ForAllValues": ("aws_s3_bucket_policy", {"policy": BARE_FOR_ALL_VALUES_READ}, None),
+        "public policy with optional ForAllValues key": (
+            "aws_s3_bucket_policy",
+            {"policy": FOR_ALL_VALUES_OPTIONAL_READ},
+            None,
+        ),
         "ECS public IP unknown until apply": (
             "aws_ecs_service",
             {"network_configuration": [{"subnets": ["subnet-1"]}]},
