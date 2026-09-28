@@ -22,7 +22,7 @@ CodePipeline with CodeBuild as tested examples.
 - **The deployed image is the scanned image.** It is built once, gated by Trivy, attested, pushed with its digest
   preserved and deployed as `image@sha256`. A post-deploy check fails the run if the circuit breaker rolled back.
 - **Pull requests cannot deploy.** The deploy role refuses the `pull_request` subject, and no pull request workflow
-  can request an `id-token` except the optional read-only plan.
+  in this repository can request an `id-token`.
 - **The same pattern on GitLab CI.** `examples/gitlab-ci/` deploys the same image to the same service through
   GitLab's OIDC tokens, with its own tests. Jenkins is covered as a documented pattern.
 - **The same deploy with AWS-native tools.** `examples/codepipeline/` runs CodeBuild (tests, Trivy gate, push by
@@ -58,8 +58,8 @@ The work is done when:
    subject (GitLab), with audience `sts.amazonaws.com`; `terraform test` asserts both.
 3. The role's actions are named in full and scoped to one repository, service and execution role; `terraform test`
    asserts it offline and `make test-live` checks it with the IAM policy simulator.
-4. A pull request cannot obtain AWS credentials; `tests/test_workflows.py` fails if any pull request workflow other
-   than the optional read-only plan asks for an `id-token`.
+4. A pull request cannot obtain AWS credentials; `tests/test_workflows.py` fails if any pull request workflow in
+   `.github/workflows/` asks for an `id-token`.
 5. The deployed digest equals the scanned digest, and a rollback fails the run.
 6. `make verify` passes offline in under a minute.
 7. The same deploy through AWS CodePipeline keeps the same gates: tests and Trivy before the push, a manual approval
@@ -132,10 +132,11 @@ infra/terraform/policies/  trust and permission policies as JSON templates
 infra/terraform/tests/     terraform test with a mocked provider
 examples/gitlab-ci/        .gitlab-ci.yml and a Terraform root for the GitLab OIDC role, with tests
 examples/codepipeline/     buildspecs and a Terraform root for CodePipeline, CodeBuild and their roles, with tests
+examples/workflows/        plan.yml: a read-only terraform plan on pull requests, for a client to install
 tests/                     pytest: workflow hardening rules, GitLab pipeline and buildspec properties
 scripts/                   verify-deployment.sh (every pipeline), test-live.sh and test-live-codepipeline.sh
                            (manual, real AWS)
-.github/workflows/         ci (make verify + shared checks), security (SARIF gates), deploy, plan, scorecard,
+.github/workflows/         ci (make verify + shared checks), security (SARIF gates), deploy, scorecard,
                            update-pre-commit-hooks
 docs/adr/                  architecture decision records
 docs/diagrams/             context, deployment and CodePipeline diagrams (.drawio source, .png export)
@@ -158,6 +159,7 @@ Architecture decision records follow the *Fundamentals of Software Architecture*
 | [0008](docs/adr/0008-offline-policy-tests.md) | Test IAM policies offline with terraform test and a mocked provider | Accepted |
 | [0009](docs/adr/0009-gitlab-ci-example.md) | Show the GitLab CI equivalent as a tested example, bound to the protected branch | Accepted |
 | [0010](docs/adr/0010-github-actions-vs-codepipeline.md) | GitHub Actions vs CodePipeline: when to use each | Accepted |
+| [0011](docs/adr/0011-plan-workflow-as-example.md) | Ship the pull request plan workflow as a client-installed example | Accepted |
 
 ## Security and quality gates
 
@@ -191,7 +193,7 @@ Branch protection on `main` requires these checks; the command that applies them
 
 ## Limits and production adaptations
 
-- **CI never touches AWS.** The policies are tested offline with a mocked provider
+- **CI checks never touch AWS; only the deploy job does.** The policies are tested offline with a mocked provider
   ([ADR 0008](docs/adr/0008-offline-policy-tests.md)); that proves what the JSON says. `make test-live` checks how IAM
   evaluates it, but runs only by hand.
 - **The GitLab pipeline is not run here.** Its tests prove what the files say. GitLab's subject names the branch,
@@ -210,8 +212,10 @@ Branch protection on `main` requires these checks; the command that applies them
   definition with an unverified image.
 - **One environment, one account.** A real engagement adds staging in its own account with its own role and subject,
   a load balancer, and VPC endpoints for ECR, S3 and CloudWatch Logs so task egress no longer needs the internet.
-- **The optional plan role can read state** for same-repository pull requests. That is acceptable for this stack and
-  would not be for a stack whose state holds secrets ([ADR 0007](docs/adr/0007-read-only-plan-role.md)).
+- **A pull request plan is a client-installed example.** `examples/workflows/plan.yml` and the optional plan role
+  give same-repository pull requests read access to the stack and its state once a client installs them. That is
+  acceptable for this stack and would not be for a stack whose state holds secrets
+  ([ADR 0007](docs/adr/0007-read-only-plan-role.md), [ADR 0011](docs/adr/0011-plan-workflow-as-example.md)).
 
 ## Related work
 

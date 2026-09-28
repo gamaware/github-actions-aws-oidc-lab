@@ -14,6 +14,8 @@ GitLab's OIDC tokens. Everything is verified offline; nothing in `make verify` c
 - `examples/codepipeline/`: the AWS-native path. `buildspec-build.yml` and `buildspec-verify.yml` plus
   `terraform/` for CodePipeline, two CodeBuild projects, the encrypted artifact bucket and three scoped roles, with
   mocked tests. `tests/test_codepipeline_example.py` asserts the buildspecs' properties.
+- `examples/workflows/plan.yml`: the read-only pull request plan, a client-installed example. It is not in
+  `.github/workflows/`, so no pull request here gets an OIDC token.
 - `tests/`: repository-level tests (workflow and pipeline properties).
 - `scripts/`: `verify-deployment.sh` (used by every pipeline), `test-live.sh` and `test-live-codepipeline.sh`
   (manual, real AWS).

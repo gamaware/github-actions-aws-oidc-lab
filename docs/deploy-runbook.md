@@ -43,19 +43,23 @@ reach ECR, and a copy of this repository under your own account.
 5. **Push to `main`.** Approve the deployment, then watch the build, push, deploy and verification steps. The
    service starts with `desired_count = 0`; set it to `1` and apply again once the first image exists.
 
-6. **Optional: read-only plan on pull requests.** Use the S3 backend, set `create_plan_role = true` and
-   `state_bucket`, apply, then add the variables `AWS_PLAN_ROLE_ARN` (`terraform output -raw plan_role_arn`),
-   `TF_STATE_BUCKET`, and `TF_VARS_JSON` (your `terraform.tfvars` values as one JSON object). Pull requests that
-   change `infra/terraform/` then show the plan in the job summary ([ADR 0007](adr/0007-read-only-plan-role.md)).
+6. **Optional: read-only plan on pull requests.** This repository does not run it; it ships as the example
+   `examples/workflows/plan.yml`. In your own repository, use the S3 backend, set `create_plan_role = true` and
+   `state_bucket`, apply, copy the example to `.github/workflows/plan.yml`, then add the variables
+   `AWS_PLAN_ROLE_ARN` (`terraform output -raw plan_role_arn`), `TF_STATE_BUCKET`, and `TF_VARS_JSON` (your
+   `terraform.tfvars` values as one JSON object). Pull requests that change `infra/terraform/` then show the plan in
+   the job summary. Installing it gives same-repository pull requests an OIDC token that only the read-only plan
+   role accepts ([ADR 0007](adr/0007-read-only-plan-role.md), [ADR 0011](adr/0011-plan-workflow-as-example.md)).
 
 ## Checks you can repeat
 
 - **A job without the environment cannot assume the role.** Copy the credentials step into a workflow on `main` or
   any branch with no `environment` and run it. It fails with `Not authorized to perform
   sts:AssumeRoleWithWebIdentity`, because the token's subject is `repo:OWNER/REPO:ref:refs/heads/<branch>`.
-- **A pull request cannot deploy.** `ci.yml` and `security.yml` have no `id-token: write`. The
-  optional `plan.yml` gets a token with the `pull_request` subject, which the deploy role refuses and only the
-  read-only plan role accepts. Fork pull requests get no token at all.
+- **A pull request cannot obtain AWS credentials.** No pull request workflow in `.github/workflows/` has
+  `id-token: write`, and `tests/test_workflows.py` fails if one does. If a client installs the example
+  `plan.yml`, its token carries the `pull_request` subject, which the deploy role refuses and only the read-only
+  plan role accepts. Fork pull requests get no token at all.
 - **The deployed image is the attested one.** Take the digest from the deploy job summary and run
   `gh attestation verify oci://YOUR_ECR_REPOSITORY_URL@sha256:DIGEST --repo OWNER/REPO`.
 - **The federated session is visible in CloudTrail.** Look up `AssumeRoleWithWebIdentity` events. The event shows
@@ -99,8 +103,8 @@ gh api --method PUT repos/OWNER/REPO/branches/main/protection --input - <<'EOF'
 EOF
 ```
 
-`Terraform plan (read-only)` is not required: it is skipped when the plan role is not configured and for fork pull
-requests.
+If you install the example `plan.yml`, do not make `Terraform plan (read-only)` a required check: it is skipped
+when the plan role is not configured and for fork pull requests.
 
 `update-pre-commit-hooks.yml` opens a weekly pull request with new hook versions. It reads the `PRE_COMMIT_PAT`
 secret (a fine-grained token with contents and pull request write access to this repository) from an environment

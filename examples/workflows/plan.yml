@@ -1,16 +1,19 @@
 name: plan
 
-# Read-only terraform plan for pull requests that change infra/terraform/.
-# It is off until the repository variable AWS_PLAN_ROLE_ARN is set
-# (create_plan_role = true in Terraform). The plan role trusts only this repository's
-# pull_request subject and can read, not change, this stack and its state
-# object. Fork pull requests get no id-token, so the job is skipped for them.
-# See docs/adr/0007-read-only-plan-role.md.
+# Example workflow, not active in this repository. A client who wants a
+# read-only terraform plan on pull requests copies it to .github/workflows/ in
+# their own repository, sets create_plan_role = true in Terraform and adds the
+# repository variable AWS_PLAN_ROLE_ARN. Installing it gives same-repository
+# pull requests an OIDC token that the read-only plan role accepts; this
+# repository's own pull request workflows request no id-token at all.
+# The plan role trusts only the pull_request subject and can read, not change,
+# the stack and its state object. Fork pull requests get no id-token, so the
+# job is skipped for them. See docs/adr/0007-read-only-plan-role.md.
 on:
   pull_request:
     paths:
       - "infra/**"
-      - ".github/workflows/plan.yml"
+      - ".github/workflows/plan.yml" # its path once installed
 
 permissions: {}
 

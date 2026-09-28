@@ -10,7 +10,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-WORKFLOWS = sorted((Path(__file__).resolve().parents[1] / ".github" / "workflows").glob("*.yml"))
+ROOT = Path(__file__).resolve().parents[1]
+WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+# Client-installed examples: not active here, held to the same hardening rules.
+EXAMPLES = sorted((ROOT / "examples" / "workflows").glob("*.yml"))
 SHA_PIN = re.compile(r"^[^@]+@[0-9a-f]{40}$")
 
 
@@ -26,33 +29,43 @@ def workflow(request):
     return request.param.name, load(request.param)
 
 
+@pytest.fixture(params=WORKFLOWS + EXAMPLES, ids=lambda p: str(p.relative_to(ROOT)))
+def any_workflow(request):
+    return request.param.name, load(request.param)
+
+
 def triggers(wf):
     on = wf["on"]
     return set(on) if isinstance(on, dict | list) else {on}
 
 
 def test_workflows_exist():
-    assert {p.name for p in WORKFLOWS} >= {"ci.yml", "deploy.yml", "plan.yml"}
+    assert {p.name for p in WORKFLOWS} >= {"ci.yml", "deploy.yml"}
+    assert {p.name for p in EXAMPLES} >= {"plan.yml"}
 
 
-def test_default_permissions_are_empty(workflow):
-    _, wf = workflow
+def test_the_cloud_plan_workflow_is_only_an_example():
+    assert "plan.yml" not in {p.name for p in WORKFLOWS}
+
+
+def test_default_permissions_are_empty(any_workflow):
+    _, wf = any_workflow
     assert wf["permissions"] == {}
 
 
-def test_no_pull_request_target(workflow):
-    _, wf = workflow
+def test_no_pull_request_target(any_workflow):
+    _, wf = any_workflow
     assert "pull_request_target" not in triggers(wf)
 
 
-def test_every_job_has_a_timeout_or_calls_a_reusable_workflow(workflow):
-    _, wf = workflow
+def test_every_job_has_a_timeout_or_calls_a_reusable_workflow(any_workflow):
+    _, wf = any_workflow
     jobs = wf["jobs"].items()
     assert [n for n, job in jobs if "timeout-minutes" not in job and "uses" not in job] == []
 
 
-def test_actions_are_pinned(workflow):
-    _, wf = workflow
+def test_actions_are_pinned(any_workflow):
+    _, wf = any_workflow
     unpinned = []
     for job in wf["jobs"].values():
         if "uses" in job and not SHA_PIN.match(job["uses"]):
@@ -64,9 +77,9 @@ def test_actions_are_pinned(workflow):
     assert unpinned == []
 
 
-def test_only_plan_may_request_an_id_token_on_pull_requests(workflow):
+def test_no_pull_request_workflow_requests_an_id_token(workflow):
     name, wf = workflow
-    if "pull_request" not in triggers(wf) or name == "plan.yml":
+    if "pull_request" not in triggers(wf):
         return
     for job_name, job in wf["jobs"].items():
         assert (job.get("permissions") or {}).get("id-token") != "write", f"{name}:{job_name}"

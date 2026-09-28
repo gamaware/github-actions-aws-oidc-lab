@@ -48,6 +48,9 @@ This file records all notable changes to this lab. The format follows
 
 ### Changed
 
+- The read-only `plan` workflow moved from `.github/workflows/` to `examples/workflows/plan.yml`, a client-installed
+  example, so no pull request workflow in this repository requests an OIDC token; `tests/test_workflows.py` no
+  longer allows an exception ([ADR 0011](docs/adr/0011-plan-workflow-as-example.md)).
 - Terraform moved from `infra/` to `infra/terraform/`, and `CODEOWNERS` to the repository root.
 - `ci.yml` is a thin caller: `make verify` plus the shared `lint-docs`, `lint-actions`, `secrets`, `container` and
   `security` workflows, pinned to commit `1255caafb08b06cc4658318c4dd48f9dea946c9e` of `gamaware/.github`.

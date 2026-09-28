@@ -20,7 +20,7 @@ environment form. Any other job gets a `ref`, `pull_request` or tag form.
 | Job on `main` without the environment, for example `build` in `deploy.yml` or the Scorecard job | `repo:OWNER/REPO:ref:refs/heads/main` | Denied by STS ([ADR 0002](adr/0002-environment-subject-only.md)) |
 | Workflow on a feature branch, no environment | `repo:OWNER/REPO:ref:refs/heads/feature-x` | Denied by STS |
 | Workflow on a feature branch that declares `environment: production` | `repo:OWNER/REPO:environment:production` | Blocked by GitHub only if the environment's deployment branches are limited to `main` (step 2 of the [deploy runbook](deploy-runbook.md)) |
-| Pull request from a branch in this repository | `repo:OWNER/REPO:pull_request` | Denied by the deploy role. Accepted by the read-only plan role only if `create_plan_role = true` (see below) |
+| Pull request from a branch in this repository | `repo:OWNER/REPO:pull_request` | No pull request workflow here requests a token. Denied by the deploy role. Accepted by the read-only plan role only where a client installs the example plan workflow and sets `create_plan_role = true` (see below) |
 | Pull request from a fork | `repo:OWNER/REPO:pull_request` | Denied by STS. On `pull_request`, GitHub gives fork PRs a read-only token and no `id-token: write`, unless a private repository enables sending write tokens to fork PR workflows |
 | Job in a different repository, even the same owner | `repo:OWNER/OTHER:...` | Denied by STS |
 | Tag push | `repo:OWNER/REPO:ref:refs/tags/v1` | Denied by STS |
@@ -61,10 +61,12 @@ reviewer. [ADR 0002](adr/0002-environment-subject-only.md) records why it was re
 
 ## The optional plan role
 
-With `create_plan_role = true`, a second role accepts exactly `repo:OWNER/REPO:pull_request`. It can only call
-`Describe`, `Get` and `List` actions on this stack's resources and read one state object. Anyone who can open a
-pull request from a branch in this repository can therefore read the lab's configuration and state. Fork pull
-requests get no OIDC token. [ADR 0007](adr/0007-read-only-plan-role.md) records the trade-off.
+This repository does not run a pull request plan. `examples/workflows/plan.yml` is an example a client installs in
+their own repository. With `create_plan_role = true`, a second role accepts exactly `repo:OWNER/REPO:pull_request`.
+It can only call `Describe`, `Get` and `List` actions on this stack's resources and read one state object. Once the
+example is installed, anyone who can open a pull request from a branch in that repository can read the stack's
+configuration and state. Fork pull requests get no OIDC token. [ADR 0007](adr/0007-read-only-plan-role.md) records
+the trade-off and [ADR 0011](adr/0011-plan-workflow-as-example.md) why the workflow is an example.
 
 ## Residual risks
 
