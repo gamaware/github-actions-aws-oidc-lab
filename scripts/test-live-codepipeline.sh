@@ -12,22 +12,33 @@
 #
 # What it does:
 #   1. prints the caller identity so the operator can confirm the account;
-#   2. copies infra/terraform and examples/codepipeline/terraform to a
-#      temporary directory (no state lands in the repository) and applies both
-#      with the tag purpose = portfolio-test on every resource. The pipeline
-#      uses the S3 source, so no GitHub connection handshake is needed; the
-#      ECS service runs one task with a public IP and no inbound rule;
+#   2. copies the live network root (tests/live/terraform), infra/terraform
+#      and examples/codepipeline/terraform to a temporary directory (no state
+#      lands in the repository) and applies them in that order with the tag
+#      purpose = portfolio-test on every resource. Before each apply, the
+#      private-only pre-flight runs terraform plan -out with the exact live
+#      variables, terraform show -json and scripts/check_private_plan.py; a
+#      plan with anything internet-facing stops the run before that root is
+#      applied, and the saved plan is what gets applied. The network is a
+#      dedicated VPC with private subnets only, no internet or NAT gateway, and
+#      VPC endpoints for ECR, S3 and CloudWatch Logs. The ECS service runs one
+#      task with no public IP and no inbound rule, with the settings in
+#      tests/live/deploy-target.tfvars.json. The pipeline uses the S3 source,
+#      so no GitHub connection handshake is needed;
 #   3. uploads `git archive HEAD` as the source zip and starts the pipeline;
 #   4. asks the IAM policy simulator what each pipeline role can and cannot do;
 #   5. approves the Approve stage once the build has pushed the image, and
-#      waits for Deploy and Verify to succeed;
+#      waits for Deploy and Verify to succeed. Health is read through the ECS
+#      API only: the Verify stage runs scripts/verify-deployment.sh (PRIMARY
+#      deployment, rollout state, task health from the container health
+#      check), and nothing calls the service over the network;
 #   6. on exit, success or failure, deregisters the task definition revisions
-#      the pipeline registered, destroys both stacks and checks that no
-#      resource tagged purpose = portfolio-test remains.
+#      the pipeline registered, destroys both stacks and the network and checks
+#      that no resource tagged purpose = portfolio-test remains.
 #
-# Needs: terraform, the AWS CLI, git, a default VPC with a public subnet in
-# the region (or set VPC_ID and SUBNET_ID), and permissions to create IAM
-# roles, KMS keys, S3 buckets, CodeBuild projects and pipelines. Takes about
+# Needs: terraform, python3, the AWS CLI, git, and permissions to create a VPC
+# with VPC endpoints, IAM roles, KMS keys, S3 buckets, CodeBuild projects and
+# pipelines. Takes about
 # 15 minutes. Only committed files are built: commit before running it.
 # Never commit output from this script.
 
@@ -39,8 +50,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_ID="$(openssl rand -hex 3)"
 NAME="cp-live-$RUN_ID"
 WORK="$(mktemp -d)"
+NETWORK_ROOT="$WORK/tests/live/terraform"
 TARGET_ROOT="$WORK/infra/terraform"
 PIPELINE_ROOT="$WORK/examples/codepipeline/terraform"
+TARGET_VARS_FILE="$REPO_ROOT/tests/live/deploy-target.tfvars.json"
 TAG_KEY="purpose"
 TAG_VALUE="portfolio-test"
 WAIT_SECONDS="${WAIT_SECONDS:-1800}"
@@ -48,6 +61,22 @@ failures=0
 
 aws_() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 tf() { terraform -chdir="$1" "${@:2}"; }
+
+# preflight ROOT LABEL VAR_ARGS...: plans ROOT with exactly the variables the
+# apply uses, writes the plan's JSON form to the run's temporary directory and
+# refuses the run if scripts/check_private_plan.py finds anything
+# internet-facing. Nothing is applied for ROOT when it fails.
+preflight() {
+  local root="$1" label="$2"
+  echo "--- Pre-flight: private-only check of the $label plan"
+  tf "$root" plan -input=false -no-color -out="$WORK/$label.tfplan" "${@:3}" >/dev/null
+  tf "$root" show -json "$WORK/$label.tfplan" >"$WORK/$label.plan.json"
+  python3 "$REPO_ROOT/scripts/check_private_plan.py" "$WORK/$label.plan.json" ||
+    { echo "::error::The $label plan would create internet-facing resources; nothing was applied for it."; exit 1; }
+}
+
+# apply_checked ROOT LABEL: applies exactly the plan the pre-flight checked.
+apply_checked() { tf "$1" apply -input=false -no-color "$WORK/$2.tfplan" >/dev/null; }
 
 # Static keys in the environment would take precedence over the profile for
 # Terraform and could point at another account.
@@ -104,6 +133,10 @@ teardown() {
     tf "$TARGET_ROOT" destroy -auto-approve -input=false -no-color "${target_vars[@]}" >/dev/null ||
       { echo "::error::terraform destroy failed for the deploy target; clean up resources named $NAME by hand."; destroyed=false; }
   fi
+  if [[ -f "$NETWORK_ROOT/terraform.tfstate" ]]; then
+    tf "$NETWORK_ROOT" destroy -auto-approve -input=false -no-color "${network_vars[@]}" >/dev/null ||
+      { echo "::error::terraform destroy failed for the live network; clean up the VPC tagged Project=$NAME by hand."; destroyed=false; }
+  fi
 
   echo "--- Checking that nothing tagged $TAG_KEY=$TAG_VALUE remains"
   local leftovers="" tagged
@@ -146,6 +179,12 @@ teardown() {
       leftovers+=$'\n'"role/$role"
     fi
   done
+  local vpcs
+  if vpcs="$(aws_ ec2 describe-vpcs --filters "Name=tag:Project,Values=$NAME" --query 'Vpcs[].VpcId' --output text)"; then
+    [[ -z "${vpcs//[$'\t\n ']/}" ]] || leftovers+=$'\n'"VPC $vpcs"
+  else
+    leftovers+=$'\n'"(could not list VPCs; check for a VPC tagged Project=$NAME by hand)"
+  fi
   if aws_ codepipeline get-pipeline --name "$NAME-pipeline" >/dev/null 2>&1; then
     leftovers+=$'\n'"pipeline/$NAME-pipeline"
   fi
@@ -179,16 +218,11 @@ stop_executions() {
   done
   sleep 10
 }
+network_vars=()
 target_vars=()
 pipeline_vars=()
 github_provider=false
 trap teardown EXIT
-
-vpc_id="${VPC_ID:-$(aws_ ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)}"
-[[ "$vpc_id" != "None" && -n "$vpc_id" ]] || { echo "::error::No default VPC in $REGION; set VPC_ID and SUBNET_ID."; exit 1; }
-subnet_id="${SUBNET_ID:-$(aws_ ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc_id" \
-  "Name=map-public-ip-on-launch,Values=true" --query 'Subnets[0].SubnetId' --output text)}"
-[[ "$subnet_id" != "None" && -n "$subnet_id" ]] || { echo "::error::No public subnet in $vpc_id; set SUBNET_ID."; exit 1; }
 
 # The deploy target root also defines the GitHub OIDC provider. Create it only
 # when the account has none; an existing one is read and never destroyed, and
@@ -198,11 +232,12 @@ github_provider=true
 tr '\t' '\n' <<<"$providers" | grep -q 'oidc-provider/token.actions.githubusercontent.com$' && github_provider=false
 
 # Same relative layout as the repository.
-mkdir -p "$WORK/infra" "$WORK/examples/codepipeline"
+mkdir -p "$WORK/infra" "$WORK/examples/codepipeline" "$WORK/tests/live"
+cp -R "$REPO_ROOT/tests/live/terraform" "$NETWORK_ROOT"
 cp -R "$REPO_ROOT/infra/terraform" "$TARGET_ROOT"
 cp -R "$REPO_ROOT/examples/codepipeline/terraform" "$PIPELINE_ROOT"
 # Only tracked configuration: no local state, variables or backend files.
-for root in "$TARGET_ROOT" "$PIPELINE_ROOT"; do
+for root in "$NETWORK_ROOT" "$TARGET_ROOT" "$PIPELINE_ROOT"; do
   rm -rf "$root/.terraform" "$root"/*.tfstate* "$root"/*.tfvars "$root"/*.tfvars.json "$root/backend.tf"
 done
 
@@ -217,16 +252,31 @@ if [[ -n "${TEST_LIVE_EXTRA_TAGS:-}" ]]; then
 fi
 tags+="}"
 
+# The task pulls from ECR and writes logs through the network's VPC
+# endpoints, so the interface endpoints are on.
+network_vars=(-var "name=$NAME" -var "aws_region=$REGION" -var "interface_endpoints=true" -var "tags=$tags")
+
+echo "--- Applying the private live network as $NAME"
+tf "$NETWORK_ROOT" init -input=false -no-color >/dev/null
+preflight "$NETWORK_ROOT" network "${network_vars[@]}"
+apply_checked "$NETWORK_ROOT" network
+vpc_id="$(tf "$NETWORK_ROOT" output -raw vpc_id)"
+subnet_ids="$(tf "$NETWORK_ROOT" output -json subnet_ids)"
+
+# assign_public_ip and ingress_cidr_blocks come only from the tracked
+# private-only settings file.
 target_vars=(
+  -var-file="$TARGET_VARS_FILE"
   -var "name=$NAME" -var "aws_region=$REGION"
   -var "github_owner=example-owner" -var "github_repo=example-repo"
-  -var "vpc_id=$vpc_id" -var "subnet_ids=[\"$subnet_id\"]" -var "assign_public_ip=true"
+  -var "vpc_id=$vpc_id" -var "subnet_ids=$subnet_ids"
   -var "create_oidc_provider=$github_provider" -var "desired_count=1" -var "tags=$tags"
 )
 
 echo "--- Applying the deploy target as $NAME"
 tf "$TARGET_ROOT" init -input=false -no-color >/dev/null
-tf "$TARGET_ROOT" apply -auto-approve -input=false -no-color "${target_vars[@]}" >/dev/null
+preflight "$TARGET_ROOT" target "${target_vars[@]}"
+apply_checked "$TARGET_ROOT" target
 
 out() { tf "$TARGET_ROOT" output -raw "$1"; }
 ecr_arn="$(out ecr_repository_arn)"
@@ -243,7 +293,8 @@ pipeline_vars=(
 
 echo "--- Applying the pipeline stack"
 tf "$PIPELINE_ROOT" init -input=false -no-color >/dev/null
-tf "$PIPELINE_ROOT" apply -auto-approve -input=false -no-color "${pipeline_vars[@]}" >/dev/null
+preflight "$PIPELINE_ROOT" pipeline "${pipeline_vars[@]}"
+apply_checked "$PIPELINE_ROOT" pipeline
 pout() { tf "$PIPELINE_ROOT" output -raw "$1"; }
 pipeline="$(pout pipeline_name)"
 bucket="$(pout artifact_bucket)"

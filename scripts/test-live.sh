@@ -10,17 +10,24 @@
 #
 # What it does:
 #   1. prints the caller identity so the operator can confirm the account;
-#   2. copies both Terraform roots to a temporary directory (no state or plan
-#      files land in the repository) and applies them with desired_count = 0
-#      and the tag purpose = portfolio-test on every resource;
-#   3. asks the IAM policy simulator whether each deploy role can do what the
+#   2. copies the live network root (tests/live/terraform) and both Terraform
+#      roots to a temporary directory (no state or plan files land in the
+#      repository);
+#   3. for each root in turn, runs the private-only pre-flight: terraform plan
+#      -out with the exact live variables, terraform show -json, and
+#      scripts/check_private_plan.py. A plan with anything internet-facing
+#      stops the run before that root is applied. The saved plan is what gets
+#      applied. The network is a dedicated VPC with private subnets only (no
+#      internet or NAT gateway); the deploy target takes its private settings
+#      from tests/live/deploy-target.tfvars.json and runs desired_count = 0;
+#      every resource gets the tag purpose = portfolio-test;
+#   4. asks the IAM policy simulator whether each deploy role can do what the
 #      pipeline needs, and cannot do anything next to it;
-#   4. on exit, success or failure, destroys both stacks and checks that no
-#      resource tagged purpose = portfolio-test remains.
+#   5. on exit, success or failure, destroys the stacks and the network and
+#      checks that no resource tagged purpose = portfolio-test remains.
 #
-# Needs: terraform, the AWS CLI, jq, a default VPC in the region (or set
-# VPC_ID and SUBNET_ID), and IAM permissions to create roles and OIDC
-# providers. The OIDC providers are created only if the account has none for
+# Needs: terraform, python3, the AWS CLI, jq, and permissions to create a VPC,
+# IAM roles and OIDC providers. The OIDC providers are created only if the account has none for
 # the same URL, and are then destroyed with the stack unless a role outside
 # the run trusts them by then.
 # Never commit output from this script.
@@ -33,14 +40,32 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_ID="$(openssl rand -hex 3)"
 NAME="oidc-live-$RUN_ID"
 WORK="$(mktemp -d)"
+NETWORK_ROOT="$WORK/tests/live/terraform"
 GITHUB_ROOT="$WORK/infra/terraform"
 GITLAB_ROOT="$WORK/examples/gitlab-ci/terraform"
+TARGET_VARS_FILE="$REPO_ROOT/tests/live/deploy-target.tfvars.json"
 TAG_KEY="purpose"
 TAG_VALUE="portfolio-test"
 failures=0
 
 aws_() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 tf() { terraform -chdir="$1" "${@:2}"; }
+
+# preflight ROOT LABEL VAR_ARGS...: plans ROOT with exactly the variables the
+# apply uses, writes the plan's JSON form to the run's temporary directory and
+# refuses the run if scripts/check_private_plan.py finds anything
+# internet-facing. Nothing is applied for ROOT when it fails.
+preflight() {
+  local root="$1" label="$2"
+  echo "--- Pre-flight: private-only check of the $label plan"
+  tf "$root" plan -input=false -no-color -out="$WORK/$label.tfplan" "${@:3}" >/dev/null
+  tf "$root" show -json "$WORK/$label.tfplan" >"$WORK/$label.plan.json"
+  python3 "$REPO_ROOT/scripts/check_private_plan.py" "$WORK/$label.plan.json" ||
+    { echo "::error::The $label plan would create internet-facing resources; nothing was applied for it."; exit 1; }
+}
+
+# apply_checked ROOT LABEL: applies exactly the plan the pre-flight checked.
+apply_checked() { tf "$1" apply -input=false -no-color "$WORK/$2.tfplan" >/dev/null; }
 
 # Static keys in the environment would take precedence over the profile for
 # Terraform and could point at another account.
@@ -95,6 +120,10 @@ teardown() {
     tf "$GITHUB_ROOT" destroy -auto-approve -input=false -no-color "${github_vars[@]}" >/dev/null ||
       { echo "::error::terraform destroy failed for the GitHub stack; clean up resources named $NAME by hand."; destroyed=false; }
   fi
+  if [[ -f "$NETWORK_ROOT/terraform.tfstate" ]]; then
+    tf "$NETWORK_ROOT" destroy -auto-approve -input=false -no-color "${network_vars[@]}" >/dev/null ||
+      { echo "::error::terraform destroy failed for the live network; clean up the VPC tagged Project=$NAME by hand."; destroyed=false; }
+  fi
 
   echo "--- Checking that nothing tagged $TAG_KEY=$TAG_VALUE remains"
   local leftovers="" tagged
@@ -129,6 +158,12 @@ teardown() {
     [[ -z "$leftovers" ]] && break
     sleep 10
   done
+  local vpcs
+  if vpcs="$(aws_ ec2 describe-vpcs --filters "Name=tag:Project,Values=$NAME" --query 'Vpcs[].VpcId' --output text)"; then
+    [[ -z "${vpcs//[$'\t\n ']/}" ]] || leftovers+=$'\n'"VPC $vpcs"
+  else
+    leftovers+=$'\n'"(could not list VPCs; check for a VPC tagged Project=$NAME by hand)"
+  fi
   for role in "$NAME-github-deploy" "$NAME-gitlab-deploy" "$NAME-task-execution"; do
     if aws_ iam get-role --role-name "$role" >/dev/null 2>&1; then
       leftovers+=$'\n'"role/$role"
@@ -159,17 +194,12 @@ teardown() {
   echo "Nothing tagged $TAG_KEY=$TAG_VALUE remains for $NAME."
   exit "$status"
 }
+network_vars=()
 github_vars=()
 gitlab_vars=()
 github_provider=false
 gitlab_provider=false
 trap teardown EXIT
-
-vpc_id="${VPC_ID:-$(aws_ ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)}"
-[[ "$vpc_id" != "None" && -n "$vpc_id" ]] || { echo "::error::No default VPC in $REGION; set VPC_ID and SUBNET_ID."; exit 1; }
-subnet_id="${SUBNET_ID:-$(aws_ ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc_id" \
-  --query 'Subnets[0].SubnetId' --output text)}"
-[[ "$subnet_id" != "None" && -n "$subnet_id" ]] || { echo "::error::No subnet in $vpc_id; set SUBNET_ID."; exit 1; }
 
 # Create a provider only when the account has none for that URL; an existing
 # one is read through a data source and never destroyed.
@@ -181,11 +211,13 @@ provider_exists gitlab.com "$providers" && gitlab_provider=false
 
 # Same relative layout as the repository: the GitLab root reads the deploy
 # policy template from ../../../infra/terraform.
-mkdir -p "$WORK/infra" "$WORK/examples/gitlab-ci"
+# The live network root's tests load infra/terraform from ../../../ as well.
+mkdir -p "$WORK/infra" "$WORK/examples/gitlab-ci" "$WORK/tests/live"
+cp -R "$REPO_ROOT/tests/live/terraform" "$NETWORK_ROOT"
 cp -R "$REPO_ROOT/infra/terraform" "$WORK/infra/terraform"
 cp -R "$REPO_ROOT/examples/gitlab-ci/terraform" "$WORK/examples/gitlab-ci/terraform"
 # Only tracked configuration: no local state, variables or backend files.
-for root in "$GITHUB_ROOT" "$GITLAB_ROOT"; do
+for root in "$NETWORK_ROOT" "$GITHUB_ROOT" "$GITLAB_ROOT"; do
   rm -rf "$root/.terraform" "$root"/*.tfstate* "$root"/*.tfvars "$root"/*.tfvars.json "$root/backend.tf"
 done
 
@@ -200,16 +232,33 @@ if [[ -n "${TEST_LIVE_EXTRA_TAGS:-}" ]]; then
 fi
 tags+="}"
 
+# No task runs here (desired_count = 0), so the network needs no interface
+# endpoints.
+network_vars=(
+  -var "name=$NAME" -var "aws_region=$REGION" -var "interface_endpoints=false" -var "tags=$tags"
+)
+
+echo "--- Applying the private live network as $NAME"
+tf "$NETWORK_ROOT" init -input=false -no-color >/dev/null
+preflight "$NETWORK_ROOT" network "${network_vars[@]}"
+apply_checked "$NETWORK_ROOT" network
+vpc_id="$(tf "$NETWORK_ROOT" output -raw vpc_id)"
+subnet_ids="$(tf "$NETWORK_ROOT" output -json subnet_ids)"
+
+# assign_public_ip and ingress_cidr_blocks come only from the tracked
+# private-only settings file.
 github_vars=(
+  -var-file="$TARGET_VARS_FILE"
   -var "name=$NAME" -var "aws_region=$REGION"
   -var "github_owner=example-owner" -var "github_repo=example-repo"
-  -var "vpc_id=$vpc_id" -var "subnet_ids=[\"$subnet_id\"]"
+  -var "vpc_id=$vpc_id" -var "subnet_ids=$subnet_ids"
   -var "create_oidc_provider=$github_provider" -var "desired_count=0" -var "tags=$tags"
 )
 
 echo "--- Applying the GitHub stack as $NAME"
 tf "$GITHUB_ROOT" init -input=false -no-color >/dev/null
-tf "$GITHUB_ROOT" apply -auto-approve -input=false -no-color "${github_vars[@]}" >/dev/null
+preflight "$GITHUB_ROOT" github "${github_vars[@]}"
+apply_checked "$GITHUB_ROOT" github
 
 out() { tf "$GITHUB_ROOT" output -raw "$1"; }
 ecr_arn="$(out ecr_repository_arn)"
@@ -229,7 +278,8 @@ gitlab_vars=(
 
 echo "--- Applying the GitLab stack"
 tf "$GITLAB_ROOT" init -input=false -no-color >/dev/null
-tf "$GITLAB_ROOT" apply -auto-approve -input=false -no-color "${gitlab_vars[@]}" >/dev/null
+preflight "$GITLAB_ROOT" gitlab "${gitlab_vars[@]}"
+apply_checked "$GITLAB_ROOT" gitlab
 gitlab_role="$(tf "$GITLAB_ROOT" output -raw deploy_role_arn)"
 
 other_repo="${ecr_arn%/*}/not-$NAME"

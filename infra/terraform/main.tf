@@ -132,7 +132,8 @@ resource "aws_vpc_security_group_ingress_rule" "app" {
 
 # Tasks pull from ECR and write logs over the internet (NAT or a public IP),
 # so HTTPS egress is open. With VPC endpoints for ECR, S3 and CloudWatch Logs
-# this rule would target the endpoints instead (README, limits).
+# this rule would target the endpoints instead (README, limits). The live tests
+# run in a VPC with no internet path, where it reaches only those endpoints.
 #trivy:ignore:AWS-0104
 resource "aws_vpc_security_group_egress_rule" "https" {
   security_group_id = aws_security_group.app.id

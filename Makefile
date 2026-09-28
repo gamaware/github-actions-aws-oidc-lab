@@ -6,7 +6,7 @@
 UVX       ?= uvx
 TERRAFORM ?= terraform
 TFLINT    ?= tflint
-TF_ROOTS  := infra/terraform examples/gitlab-ci/terraform examples/codepipeline/terraform
+TF_ROOTS  := infra/terraform examples/gitlab-ci/terraform examples/codepipeline/terraform tests/live/terraform
 SHELL_FILES := $(wildcard scripts/*.sh .claude/hooks/*.sh)
 
 PYTEST    := $(UVX) --with-requirements app/requirements-dev.txt pytest
