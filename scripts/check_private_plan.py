@@ -30,7 +30,14 @@ FORBIDDEN_TYPES = {
     "aws_cloudfront_distribution": "CloudFront distribution",
     "aws_globalaccelerator_accelerator": "Global Accelerator",
     "aws_apigatewayv2_api": "API Gateway HTTP/WebSocket API",
+    "aws_ecrpublic_repository": "ECR Public repository",
+    "aws_s3_bucket_website_configuration": "S3 static website endpoint",
 }
+
+PUBLIC_ACLS = {"public-read", "public-read-write", "authenticated-read"}
+
+# Resource policies that could grant access to anyone: an Allow to "*" without a Condition is refused.
+POLICY_TYPES = {"aws_s3_bucket_policy", "aws_ecr_repository_policy", "aws_ecrpublic_repository_policy"}
 
 PUBLICLY_ACCESSIBLE_TYPES = {
     "aws_db_instance",
@@ -63,6 +70,29 @@ def _default_route_via_gateway(route: dict[str, Any], unknown: dict[str, Any]) -
     if not any(route.get(key) in WORLD for key in keys):
         return False
     return any(route.get(key) or unknown.get(key) for key in ("gateway_id", "nat_gateway_id", "egress_only_gateway_id"))
+
+
+def _allows_anyone(policy: Any) -> bool:
+    """True when a policy document has an Allow statement for any principal ("*") and no Condition."""
+    if not isinstance(policy, str) or not policy:
+        return False
+    try:
+        document = json.loads(policy)
+    except json.JSONDecodeError:
+        return False
+    statements = document.get("Statement", [])
+    if isinstance(statements, dict):
+        statements = [statements]
+    for statement in statements:
+        principal = statement.get("Principal")
+        anyone = principal == "*" or (isinstance(principal, dict) and "*" in _as_list(principal.get("AWS")))
+        if statement.get("Effect") == "Allow" and anyone and not statement.get("Condition"):
+            return True
+    return False
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else [value]
 
 
 def violations(plan: dict[str, Any]) -> list[str]:
@@ -110,6 +140,14 @@ def violations(plan: dict[str, Any]) -> list[str]:
                 )
                 if _default_route_via_gateway(route, route_unknown if isinstance(route_unknown, dict) else {}):
                     found.append(f"{address}: default route to the internet")
+        elif rtype in POLICY_TYPES and _allows_anyone(after.get("policy")):
+            found.append(f"{address}: resource policy allows any principal")
+        elif rtype in ("aws_s3_bucket_public_access_block", "aws_s3_account_public_access_block"):
+            keys = ("block_public_acls", "block_public_policy", "ignore_public_acls", "restrict_public_buckets")
+            if not all(after.get(key) is True for key in keys):
+                found.append(f"{address}: all four S3 public access block settings must be true")
+        elif rtype == "aws_s3_bucket_acl" and after.get("acl") in PUBLIC_ACLS:
+            found.append(f"{address}: public S3 bucket ACL {after.get('acl')}")
         elif rtype == "aws_api_gateway_rest_api":
             types = [t for cfg in after.get("endpoint_configuration") or [] for t in cfg.get("types") or []]
             if types != ["PRIVATE"]:

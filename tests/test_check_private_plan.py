@@ -30,6 +30,25 @@ def plan(*resources):
     }
 
 
+BLOCK_KEYS = ("block_public_acls", "block_public_policy", "ignore_public_acls", "restrict_public_buckets")
+DENY_INSECURE = json.dumps(
+    {
+        "Statement": [
+            {
+                "Effect": "Deny",
+                "Principal": "*",
+                "Action": "s3:*",
+                "Condition": {"Bool": {"aws:SecureTransport": "false"}},
+            }
+        ]
+    }
+)
+ACCOUNT_PULL = json.dumps(
+    {"Statement": [{"Effect": "Allow", "Principal": {"AWS": "arn:aws:iam::111122223333:root"}, "Action": "ecr:*"}]}
+)
+OPEN_READ = json.dumps({"Statement": [{"Effect": "Allow", "Principal": "*", "Action": "s3:GetObject"}]})
+OPEN_PULL = json.dumps({"Statement": {"Effect": "Allow", "Principal": {"AWS": ["*"]}, "Action": "ecr:BatchGetImage"}})
+
 PRIVATE = plan(
     ("aws_lb", "app", {"internal": True, "load_balancer_type": "application"}, None),
     ("aws_vpc_security_group_ingress_rule", "alb", {"cidr_ipv4": "10.0.0.0/16", "from_port": 443}, None),
@@ -40,19 +59,22 @@ PRIVATE = plan(
     ("aws_db_instance", "db", {"publicly_accessible": False}, None),
     ("aws_nat_gateway", "private", {"connectivity_type": "private"}, None),
     ("aws_vpc_security_group_egress_rule", "https", {"cidr_ipv4": "0.0.0.0/0", "from_port": 443}, None),
+    ("aws_s3_bucket_public_access_block", "b", dict.fromkeys(BLOCK_KEYS, True), None),
+    ("aws_s3_bucket_policy", "tls", {"policy": DENY_INSECURE}, None),
+    ("aws_ecr_repository_policy", "pull", {"policy": ACCOUNT_PULL}, None),
 )
 
 
 class PrivatePlan(unittest.TestCase):
     def test_private_plan_passes(self):
-        self.assertEqual(check.violations(PRIVATE), [])
+        assert check.violations(PRIVATE) == []
 
     def test_destroyed_and_data_resources_are_ignored(self):
         doc = plan(("aws_internet_gateway", "old", None, None))
         doc["resource_changes"].append(
             {"address": "data.aws_lb.x", "mode": "data", "type": "aws_lb", "change": {"after": {"internal": False}}}
         )
-        self.assertEqual(check.violations(doc), [])
+        assert check.violations(doc) == []
 
 
 class InternetFacing(unittest.TestCase):
@@ -80,6 +102,16 @@ class InternetFacing(unittest.TestCase):
         "public DMS instance": ("aws_dms_replication_instance", {"publicly_accessible": True}, None),
         "public instance": ("aws_instance", {"associate_public_ip_address": True}, None),
         "function URL": ("aws_lambda_function_url", {"authorization_type": "NONE"}, None),
+        "Route 53 hosted zone": ("aws_route53_zone", {"name": "example.com"}, None),
+        "Route 53 record": ("aws_route53_record", {"type": "A"}, None),
+        "Route 53 health check": ("aws_route53_health_check", {"type": "HTTPS"}, None),
+        "public EKS endpoint": ("aws_eks_cluster", {"vpc_config": [{"endpoint_public_access": True}]}, None),
+        "public S3 bucket policy": ("aws_s3_bucket_policy", {"policy": OPEN_READ}, None),
+        "public ECR policy": ("aws_ecr_repository_policy", {"policy": OPEN_PULL}, None),
+        "ECR Public repository": ("aws_ecrpublic_repository", {"repository_name": "x"}, None),
+        "S3 website": ("aws_s3_bucket_website_configuration", {}, None),
+        "weak public access block": ("aws_s3_bucket_public_access_block", {"block_public_policy": False}, None),
+        "public-read ACL": ("aws_s3_bucket_acl", {"acl": "public-read"}, None),
         "regional REST API": ("aws_api_gateway_rest_api", {"endpoint_configuration": [{"types": ["REGIONAL"]}]}, None),
     }
 
@@ -87,8 +119,8 @@ class InternetFacing(unittest.TestCase):
         for label, (rtype, after, unknown) in self.CASES.items():
             with self.subTest(label):
                 found = check.violations(plan((rtype, "x", after, unknown)))
-                self.assertEqual(len(found), 1, found)
-                self.assertTrue(found[0].startswith(f"{rtype}.x: "), found)
+                assert len(found) == 1, found
+                assert found[0].startswith(f"{rtype}.x: "), found
 
 
 class CommandLine(unittest.TestCase):
@@ -104,18 +136,18 @@ class CommandLine(unittest.TestCase):
 
     def test_exit_zero_on_private_plan(self):
         code, out, _ = self.run_main(PRIVATE)
-        self.assertEqual(code, 0)
-        self.assertIn("private-only", out)
+        assert code == 0
+        assert "private-only" in out
 
     def test_exit_one_and_names_each_violation(self):
         code, _, err = self.run_main(plan(("aws_lb", "app", {"internal": False}, None)))
-        self.assertEqual(code, 1)
-        self.assertIn("INTERNET-FACING aws_lb.app", err)
+        assert code == 1
+        assert "INTERNET-FACING aws_lb.app" in err
 
     def test_exit_two_on_input_that_is_not_a_plan(self):
         code, _, err = self.run_main({"values": {}})
-        self.assertEqual(code, 2)
-        self.assertIn("not the JSON form", err)
+        assert code == 2
+        assert "not the JSON form" in err
 
 
 if __name__ == "__main__":
