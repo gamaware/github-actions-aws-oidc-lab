@@ -20,7 +20,7 @@ A live run cannot create anything reachable from the internet
 
 - The live network is a dedicated VPC from `tests/live/terraform/`, never the default VPC or a VPC passed in by the
   operator. Its subnets do not map public IP addresses, and its route table holds only the local route and the S3
-  gateway endpoint's route. There is no internet gateway, no NAT gateway, and no Elastic IP.
+  gateway endpoint's route. The VPC has no internet gateway, no NAT gateway, and no Elastic IP.
 - ECS tasks run with `assign_public_ip = false`. `tests/live/deploy-target.tfvars.json` sets it together with
   `ingress_cidr_blocks = []`, and the scripts pass that file to `infra/terraform` instead of setting either variable
   themselves.
