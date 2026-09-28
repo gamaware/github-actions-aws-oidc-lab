@@ -1,0 +1,93 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadStateObject",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "${state_object_arn}"
+    },
+    {
+      "Sid": "ListStateBucket",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "${state_bucket_arn}",
+      "Condition": {
+        "StringEquals": {
+          "s3:prefix": ${jsonencode(state_list_prefixes)}
+        }
+      }
+    },
+    {
+      "Sid": "ReadStackRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies"
+      ],
+      "Resource": ${jsonencode(role_arns)}
+    },
+    {
+      "Sid": "ReadOidcProvider",
+      "Effect": "Allow",
+      "Action": "iam:GetOpenIDConnectProvider",
+      "Resource": "${oidc_provider_arn}"
+    },
+    {
+      "Sid": "ReadEcrRepository",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:DescribeRepositories",
+        "ecr:GetLifecyclePolicy",
+        "ecr:ListTagsForResource"
+      ],
+      "Resource": "${ecr_repository_arn}"
+    },
+    {
+      "Sid": "ReadEcsClusterAndService",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeClusters",
+        "ecs:DescribeServices",
+        "ecs:ListTagsForResource"
+      ],
+      "Resource": [
+        "${ecs_cluster_arn}",
+        "${ecs_service_arn}",
+        "${task_definition_family_arn}"
+      ]
+    },
+    {
+      "Sid": "ReadLogsKey",
+      "Effect": "Allow",
+      "Action": [
+        "kms:DescribeKey",
+        "kms:GetKeyPolicy",
+        "kms:GetKeyRotationStatus",
+        "kms:ListResourceTags"
+      ],
+      "Resource": "${kms_key_arn}"
+    },
+    {
+      "Sid": "ReadLogGroupTags",
+      "Effect": "Allow",
+      "Action": "logs:ListTagsForResource",
+      "Resource": "${log_group_arn}"
+    },
+    {
+      "Sid": "DescribeActionsWithoutResourceScope",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeSecurityGroupRules",
+        "ec2:DescribeSecurityGroups",
+        "ecs:DescribeTaskDefinition",
+        "iam:ListOpenIDConnectProviders",
+        "kms:ListAliases",
+        "logs:DescribeLogGroups"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

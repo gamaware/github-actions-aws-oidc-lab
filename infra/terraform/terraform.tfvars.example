@@ -1,0 +1,16 @@
+aws_region   = "us-east-1"
+github_owner = "OWNER"
+github_repo  = "REPO"
+
+vpc_id     = "vpc-YOUR_VPC_ID"
+subnet_ids = ["subnet-YOUR_SUBNET_ID_A", "subnet-YOUR_SUBNET_ID_B"]
+
+# Public subnets without NAT: uncomment so tasks can pull from ECR.
+# assign_public_ip = true
+
+# Set to false if the account already has the GitHub OIDC provider.
+# create_oidc_provider = false
+
+# Read-only plan role for pull requests that change infra/terraform/ (docs/adr/0007).
+# create_plan_role = true
+# state_bucket     = "YOUR_STATE_BUCKET"

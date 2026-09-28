@@ -1,0 +1,34 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+*.tfplan
+backend.hcl
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+credentials.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Tools
+.firecrawl/
+*.sarif
+sbom.*.json
+.DS_Store
+build/
+
+# Vale packages (downloaded by vale sync)
+styles/

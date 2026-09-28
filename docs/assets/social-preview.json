@@ -1,0 +1,11 @@
+{
+  "color": "#146C43",
+  "heading": ["GitHub Actions to AWS", "without stored keys"],
+  "subtitle": "OIDC · least-privilege role · security gates · GitLab CI example",
+  "steps": [
+    {"label": "Build once, scan"},
+    {"label": "OIDC to a scoped role"},
+    {"label": "Deploy by digest, verify"}
+  ],
+  "illustration": "social-preview-illustration.svg"
+}

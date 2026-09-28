@@ -1,0 +1,60 @@
+name: update-pre-commit-hooks
+
+on:
+  schedule:
+    - cron: "0 0 * * 0"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: update-pre-commit-hooks
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: update
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Secrets are read inside a job environment. "automation" carries no protection rules.
+    environment: automation
+    permissions:
+      contents: read # checkout; the branch and pull request use PRE_COMMIT_PAT
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Update hooks
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check "pre-commit==4.6.2"
+          pre-commit autoupdate --freeze
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ secrets.PRE_COMMIT_PAT }}
+          BRANCH: chore/update-pre-commit-hooks
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "Hooks are already up to date"
+            exit 0
+          fi
+          gh auth setup-git
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git commit --all --message "chore: update pre-commit hooks"
+          git push --force origin "$BRANCH"
+          if [ "$(gh pr list --head "$BRANCH" --state open --json number --jq length)" = "0" ]; then
+            gh pr create --base main --head "$BRANCH" \
+              --title "chore: update pre-commit hook versions" \
+              --body "Automated update of pre-commit hook versions. Merge once CI passes."
+          fi

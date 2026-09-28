@@ -1,0 +1,66 @@
+# CodeBuild: test, build once, Trivy gate, push, record the digest.
+#
+# Runs in the Build stage of the pipeline in examples/codepipeline/terraform.
+# The image is pushed only after the tests and the Trivy gate pass, and the
+# pipeline deploys it as image@sha256:<digest>, never by tag
+# (docs/adr/0005-build-once-deploy-by-digest.md).
+#
+# Environment variables set by the CodeBuild project:
+#   ECR_REPOSITORY_URL  <account>.dkr.ecr.<region>.amazonaws.com/<name>
+#   CONTAINER_NAME      container to update in the task definition (app)
+version: 0.2
+
+env:
+  shell: bash
+  variables:
+    TRIVY_VERSION: "0.74.0"
+    TRIVY_SHA256: "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a"
+  # Read by the Approve and Verify stages as #{BuildVariables.IMAGE_URI}.
+  exported-variables:
+    - IMAGE_DIGEST
+    - IMAGE_URI
+
+phases:
+  install:
+    on-failure: ABORT
+    runtime-versions:
+      python: 3.13
+    commands:
+      - python -m pip install --quiet --requirement app/requirements-dev.txt
+      # Trivy from the release archive, checked against the pinned checksum.
+      - curl --fail --silent --show-error --location --output trivy.tar.gz
+        "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+      - echo "$TRIVY_SHA256  trivy.tar.gz" | sha256sum --check --strict
+      - tar -xzf trivy.tar.gz -C /usr/local/bin trivy
+      - trivy --version
+
+  pre_build:
+    on-failure: ABORT
+    commands:
+      - python -m pytest -q app/tests
+      - aws ecr get-login-password | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URL%%/*}"
+
+  # One phase from build to push: CodeBuild would run post_build even after a
+  # failed build phase, so nothing that pushes lives there.
+  build:
+    on-failure: ABORT
+    commands:
+      # Tags are immutable in ECR; the build ID is unique per build.
+      - TAG="build-${CODEBUILD_BUILD_ID#*:}"
+      - docker build --tag "$ECR_REPOSITORY_URL:$TAG" app
+      - trivy image --image-src docker --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress
+        "$ECR_REPOSITORY_URL:$TAG"
+      - docker push "$ECR_REPOSITORY_URL:$TAG"
+      - IMAGE_URI="$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ECR_REPOSITORY_URL:$TAG"
+        | grep "^$ECR_REPOSITORY_URL@sha256:" | head -n 1)"
+      - IMAGE_DIGEST="${IMAGE_URI#*@}"
+      - '[[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "No digest for the pushed image."; exit 1; }'
+      # The ECS deploy action swaps this image into the service's current
+      # task definition and registers a new revision.
+      - printf '[{"name":"%s","imageUri":"%s"}]' "$CONTAINER_NAME" "$IMAGE_URI" > imagedefinitions.json
+      - echo "Pushed $IMAGE_URI as $TAG."
+
+artifacts:
+  files:
+    - imagedefinitions.json
+  discard-paths: yes

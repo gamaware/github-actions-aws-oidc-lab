@@ -1,0 +1,29 @@
+# CodeBuild: verify the rollout after the ECS deploy action.
+#
+# The deploy action reports success once the service is stable, which also
+# happens after a circuit-breaker rollback. This runs the same
+# scripts/verify-deployment.sh as the GitHub Actions and GitLab CI paths.
+#
+# Environment variables set by the CodeBuild project or the pipeline action:
+#   ECS_CLUSTER, ECS_SERVICE, ECS_TASK_FAMILY, CONTAINER_NAME
+#   EXPECTED_IMAGE_URI   #{BuildVariables.IMAGE_URI}, from the Build stage
+#   APP_URL              optional, checks /health when set
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  build:
+    on-failure: ABORT
+    commands:
+      # The deploy action registered a new revision with the built image; it is
+      # the family's latest ACTIVE revision and must carry that exact image.
+      - EXPECTED_TASK_DEFINITION="$(aws ecs describe-task-definition --task-definition "$ECS_TASK_FAMILY"
+        --query taskDefinition.taskDefinitionArn --output text)"
+      - DEPLOYED_IMAGE="$(aws ecs describe-task-definition --task-definition "$EXPECTED_TASK_DEFINITION"
+        --query "taskDefinition.containerDefinitions[?name=='$CONTAINER_NAME'] | [0].image" --output text)"
+      - '[[ "$DEPLOYED_IMAGE" == "$EXPECTED_IMAGE_URI" ]] || { echo "$EXPECTED_TASK_DEFINITION runs $DEPLOYED_IMAGE, not $EXPECTED_IMAGE_URI."; exit 1; }'
+      - export EXPECTED_TASK_DEFINITION EXPECTED_IMAGE_DIGEST="${EXPECTED_IMAGE_URI#*@}"
+      # Through bash: zip artifacts do not always keep the executable bit.
+      - bash scripts/verify-deployment.sh

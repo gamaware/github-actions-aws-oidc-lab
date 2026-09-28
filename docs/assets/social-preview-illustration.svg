@@ -1,0 +1,21 @@
+<rect x="48" y="72" width="248" height="112"/>
+<text x="72" y="118" stroke="none" fill="#FFFFFF">deploy job</text>
+<text x="72" y="152" stroke="none" fill="#FFFFFF" fill-opacity=".7">id-token: write</text>
+<rect x="432" y="72" width="248" height="112"/>
+<text x="456" y="118" stroke="none" fill="#FFFFFF">AWS STS</text>
+<text x="456" y="152" stroke="none" fill="#FFFFFF" fill-opacity=".7">AssumeRoleWith…</text>
+<path d="M296,118 H302 M426,118 H432" stroke="#FFC34D"/>
+<rect x="302" y="96" width="124" height="44" rx="22" stroke="#FFC34D" stroke-width="3"/>
+<text x="364" y="125" text-anchor="middle" stroke="none" fill="#FFC34D">OIDC JWT</text>
+<path d="M556,184 V272"/>
+<rect x="432" y="272" width="248" height="112"/>
+<text x="456" y="318" stroke="none" fill="#FFFFFF">deploy role</text>
+<text x="456" y="352" stroke="none" fill="#FFFFFF" fill-opacity=".7">trusts one subject</text>
+<path d="M556,384 V440 M172,440 H556 M172,440 V488 M556,440 V488"/>
+<circle cx="556" cy="440" r="6" fill="#FFFFFF"/>
+<rect x="48" y="488" width="248" height="96"/>
+<rect x="432" y="488" width="248" height="96"/>
+<text x="72" y="530" stroke="none" fill="#FFFFFF">ECR</text>
+<text x="72" y="562" stroke="none" fill="#FFFFFF" fill-opacity=".7">push @sha256</text>
+<text x="456" y="530" stroke="none" fill="#FFFFFF">ECS Fargate</text>
+<text x="456" y="562" stroke="none" fill="#FFFFFF" fill-opacity=".7">deploy + verify</text>
