@@ -25,7 +25,8 @@ and `ingress_cidr_blocks` as variables, because a client's network decides them.
   those variables themselves. The production example keeps its variables unchanged.
 - Before each apply, the scripts plan with the exact live variables, convert the plan with `terraform show -json`
   and run `scripts/check_private_plan.py` on it. A violation stops the run before that root is applied, and the
-  apply uses the saved plan, so what was checked is what gets created.
+  apply uses the saved plan, so what was checked is what gets created. The checker also refuses any Route 53
+  resource and public S3, ECR, EKS or API endpoints.
 - Health is read through the ECS API (`scripts/verify-deployment.sh` with no `APP_URL`) and the container health
   check inside the task, never over the internet.
 

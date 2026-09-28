@@ -40,7 +40,10 @@ Before each root is applied, the script:
 3. runs `python3 scripts/check_private_plan.py` on it, which exits 1 and names every internet-facing resource:
    an internet gateway, a public NAT gateway, an Elastic IP, a load balancer without `internal = true`, a security
    group ingress from `0.0.0.0/0` or `::/0`, an ECS service with `assign_public_ip`, a subnet that maps public IP
-   addresses, a default route to an internet or NAT gateway, and a few more;
+   addresses, a default route to an internet or NAT gateway, and a few more. It also refuses any Route 53 resource,
+   a public EKS API endpoint and public S3 or ECR access (an ECR Public repository, an S3 website endpoint, a public
+   bucket ACL, a public access block with any setting off, or a bucket or repository policy that allows any
+   principal without a condition);
 4. applies that saved plan, and only that plan.
 
 The roots are applied in order (network, deploy target, then the GitLab or pipeline root), because the deploy target
