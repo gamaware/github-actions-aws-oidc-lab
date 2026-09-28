@@ -62,10 +62,7 @@ def _default_route_via_gateway(route: dict[str, Any], unknown: dict[str, Any]) -
     keys = ("cidr_block", "ipv6_cidr_block", "destination_cidr_block", "destination_ipv6_cidr_block")
     if not any(route.get(key) in WORLD for key in keys):
         return False
-    for key in ("gateway_id", "nat_gateway_id", "egress_only_gateway_id"):
-        if route.get(key) or unknown.get(key):
-            return True
-    return False
+    return any(route.get(key) or unknown.get(key) for key in ("gateway_id", "nat_gateway_id", "egress_only_gateway_id"))
 
 
 def violations(plan: dict[str, Any]) -> list[str]:
@@ -73,6 +70,12 @@ def violations(plan: dict[str, Any]) -> list[str]:
     for address, rtype, after, unknown in _resources(plan):
         if rtype in FORBIDDEN_TYPES:
             found.append(f"{address}: {FORBIDDEN_TYPES[rtype]} is internet-facing")
+        elif rtype.startswith("aws_route53"):
+            found.append(f"{address}: Route 53 is not used in live tests")
+        elif rtype == "aws_eks_cluster" and any(
+            cfg.get("endpoint_public_access") is not False for cfg in after.get("vpc_config") or [{}]
+        ):
+            found.append(f"{address}: EKS API endpoint must set endpoint_public_access = false")
         elif rtype == "aws_nat_gateway" and after.get("connectivity_type", "public") != "private":
             found.append(f"{address}: public NAT gateway routes workloads to the internet")
         elif rtype in ("aws_lb", "aws_alb", "aws_elb") and after.get("internal") is not True:
