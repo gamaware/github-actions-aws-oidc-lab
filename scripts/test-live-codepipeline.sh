@@ -152,7 +152,7 @@ teardown() {
     leftovers="$(tr '\t' '\n' <<<"$tagged" | grep -v '^None$' |
       while read -r arn; do
         # A destroyed KMS key waits out its deletion window; ECS clusters and
-        # task definitions stay visible as INACTIVE. None is a leftover.
+        # services and task definitions stay visible as INACTIVE. None is a leftover.
         case "$arn" in
           *:kms:*)
             state="$(aws_ kms describe-key --key-id "$arn" --query KeyMetadata.KeyState --output text)"
@@ -160,6 +160,11 @@ teardown() {
             ;;
           *:ecs:*:cluster/*)
             state="$(aws_ ecs describe-clusters --clusters "$arn" --query 'clusters[0].status' --output text)"
+            [[ "$state" == "INACTIVE" ]] || echo "$arn"
+            ;;
+          *:ecs:*:service/*)
+            state="$(aws_ ecs describe-services --cluster "$(cut -d/ -f2 <<<"$arn")" --services "$arn" \
+              --query 'services[0].status' --output text)"
             [[ "$state" == "INACTIVE" ]] || echo "$arn"
             ;;
           *:ecs:*:task-definition/*)
@@ -314,6 +319,9 @@ expect() {
     --query 'EvaluationResults[0].EvalDecision' --output text)"
   if [[ "$got" == "$want" ]]; then
     echo "ok    ${role##*/}  $action  ${resource##*:}  $got"
+  elif [[ "$want" == implicitDeny && "$got" == explicitDeny ]]; then
+    # An SCP on the account can deny the action too; the role still cannot do it.
+    echo "ok    ${role##*/}  $action  ${resource##*:}  $got (denied outside the role's policy)"
   else
     echo "FAIL  ${role##*/}  $action  ${resource##*:}  got $got, expected $want"
     failures=$((failures + 1))
