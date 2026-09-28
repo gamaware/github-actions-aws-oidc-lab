@@ -75,25 +75,25 @@ jobs:
     name: lint-docs
     permissions:
       contents: read
-    uses: gamaware/.github/.github/workflows/lint-docs.yml@1255caafb08b06cc4658318c4dd48f9dea946c9e
+    uses: gamaware/.github/.github/workflows/lint-docs.yml@1e2fe2d99f7772ad59b896f332557457ebcbdde9
 
   lint-actions:
     name: lint-actions
     permissions:
       contents: read
-    uses: gamaware/.github/.github/workflows/lint-actions.yml@1255caafb08b06cc4658318c4dd48f9dea946c9e
+    uses: gamaware/.github/.github/workflows/lint-actions.yml@1e2fe2d99f7772ad59b896f332557457ebcbdde9
 
   secrets:
     name: secrets
     permissions:
       contents: read
-    uses: gamaware/.github/.github/workflows/secrets.yml@1255caafb08b06cc4658318c4dd48f9dea946c9e
+    uses: gamaware/.github/.github/workflows/secrets.yml@1e2fe2d99f7772ad59b896f332557457ebcbdde9
 
   container:
     name: container
     permissions:
       contents: read
-    uses: gamaware/.github/.github/workflows/container.yml@1255caafb08b06cc4658318c4dd48f9dea946c9e
+    uses: gamaware/.github/.github/workflows/container.yml@1e2fe2d99f7772ad59b896f332557457ebcbdde9
     with:
       context: app
       dockerfile: app/Dockerfile
@@ -105,7 +105,7 @@ jobs:
     name: security
     permissions:
       contents: read
-    uses: gamaware/.github/.github/workflows/security.yml@1255caafb08b06cc4658318c4dd48f9dea946c9e
+    uses: gamaware/.github/.github/workflows/security.yml@1e2fe2d99f7772ad59b896f332557457ebcbdde9
     with:
       run-semgrep: false
       run-checkov: false
