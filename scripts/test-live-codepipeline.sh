@@ -60,6 +60,21 @@ if [[ "${TEST_LIVE_CONFIRM:-}" != "yes" ]]; then
   [[ "$answer" == "yes" ]] || { echo "Stopped."; exit 1; }
 fi
 
+# Removes the provider from Terraform state, so destroy leaves it in place,
+# when a role outside this run trusts it: another stack or session may have
+# started to use the provider this run created. Also keeps it when the roles
+# cannot be listed.
+keep_shared_provider() {
+  local root="$1" address="$2" host="$3" others
+  if others="$(aws_ iam list-roles --output text \
+    --query "Roles[?contains(to_string(AssumeRolePolicyDocument), '$host') && !starts_with(RoleName, '$NAME-')].RoleName")" &&
+    [[ -z "${others//[$'\t\n ']/}" || "$others" == "None" ]]; then
+    return 1
+  fi
+  tf "$root" state rm -no-color "$address" >/dev/null
+  echo "Left the $host OIDC provider in place: other roles trust it (${others:-could not list roles})."
+}
+
 teardown() {
   local status=$?
   # Also +u: bash 3.2 (macOS) treats an empty array expansion as unbound.
@@ -82,6 +97,10 @@ teardown() {
       { echo "::error::terraform destroy failed for the pipeline stack; clean up resources named $NAME by hand."; destroyed=false; }
   fi
   if [[ -f "$TARGET_ROOT/terraform.tfstate" ]]; then
+    if [[ "$github_provider" == true ]] &&
+      keep_shared_provider "$TARGET_ROOT" 'aws_iam_openid_connect_provider.github[0]' token.actions.githubusercontent.com; then
+      github_provider=false
+    fi
     tf "$TARGET_ROOT" destroy -auto-approve -input=false -no-color "${target_vars[@]}" >/dev/null ||
       { echo "::error::terraform destroy failed for the deploy target; clean up resources named $NAME by hand."; destroyed=false; }
   fi
@@ -172,7 +191,8 @@ subnet_id="${SUBNET_ID:-$(aws_ ec2 describe-subnets --filters "Name=vpc-id,Value
 [[ "$subnet_id" != "None" && -n "$subnet_id" ]] || { echo "::error::No public subnet in $vpc_id; set SUBNET_ID."; exit 1; }
 
 # The deploy target root also defines the GitHub OIDC provider. Create it only
-# when the account has none; an existing one is read and never destroyed.
+# when the account has none; an existing one is read and never destroyed, and
+# one this run created stays if a role outside the run trusts it by teardown.
 providers="$(aws_ iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[].Arn' --output text)"
 github_provider=true
 tr '\t' '\n' <<<"$providers" | grep -q 'oidc-provider/token.actions.githubusercontent.com$' && github_provider=false

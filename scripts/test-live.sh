@@ -21,7 +21,8 @@
 # Needs: terraform, the AWS CLI, jq, a default VPC in the region (or set
 # VPC_ID and SUBNET_ID), and IAM permissions to create roles and OIDC
 # providers. The OIDC providers are created only if the account has none for
-# the same URL, and are then destroyed with the stack.
+# the same URL, and are then destroyed with the stack unless a role outside
+# the run trusts them by then.
 # Never commit output from this script.
 
 set -euo pipefail
@@ -58,16 +59,39 @@ list_providers() {
 }
 provider_exists() { grep -q "oidc-provider/$1\$" <<<"$2"; }
 
+# Removes the provider from Terraform state, so destroy leaves it in place,
+# when a role outside this run trusts it: another stack or session may have
+# started to use the provider this run created. Also keeps it when the roles
+# cannot be listed.
+keep_shared_provider() {
+  local root="$1" address="$2" host="$3" others
+  if others="$(aws_ iam list-roles --output text \
+    --query "Roles[?contains(to_string(AssumeRolePolicyDocument), '$host') && !starts_with(RoleName, '$NAME-')].RoleName")" &&
+    [[ -z "${others//[$'\t\n ']/}" || "$others" == "None" ]]; then
+    return 1
+  fi
+  tf "$root" state rm -no-color "$address" >/dev/null
+  echo "Left the $host OIDC provider in place: other roles trust it (${others:-could not list roles})."
+}
+
 teardown() {
   local status=$?
   set +e
   local destroyed=true
   echo "--- Destroying the test stacks"
   if [[ -f "$GITLAB_ROOT/terraform.tfstate" ]]; then
+    if [[ "$gitlab_provider" == true ]] &&
+      keep_shared_provider "$GITLAB_ROOT" 'aws_iam_openid_connect_provider.gitlab[0]' gitlab.com; then
+      gitlab_provider=false
+    fi
     tf "$GITLAB_ROOT" destroy -auto-approve -input=false -no-color "${gitlab_vars[@]}" >/dev/null ||
       { echo "::error::terraform destroy failed for the GitLab stack; clean up $NAME-gitlab-deploy by hand."; destroyed=false; }
   fi
   if [[ -f "$GITHUB_ROOT/terraform.tfstate" ]]; then
+    if [[ "$github_provider" == true ]] &&
+      keep_shared_provider "$GITHUB_ROOT" 'aws_iam_openid_connect_provider.github[0]' token.actions.githubusercontent.com; then
+      github_provider=false
+    fi
     tf "$GITHUB_ROOT" destroy -auto-approve -input=false -no-color "${github_vars[@]}" >/dev/null ||
       { echo "::error::terraform destroy failed for the GitHub stack; clean up resources named $NAME by hand."; destroyed=false; }
   fi
