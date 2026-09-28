@@ -1,0 +1,142 @@
+name: security
+
+# The three security gates, each a required status check on main:
+#   Semgrep (code)   static analysis of the Python app, Dockerfile, workflows and Terraform
+#   Trivy (image)    fixable HIGH and CRITICAL vulnerabilities in the built image
+#   Checkov (infra)  misconfigurations in all three Terraform roots
+# Each job uploads SARIF to code scanning, even when the gate fails, so the
+# findings show up in the Security tab and on the pull request. None of them
+# touch AWS. See docs/adr/0006-security-gates.md.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, to catch newly published CVEs in an image that has not changed.
+    - cron: "17 6 * * 1"
+
+permissions: {}
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: Semgrep (code)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      # Registry rulesets named explicitly (not --config auto), so the rule set
+      # does not depend on what Semgrep detects and metrics stay off.
+      - name: Semgrep scan
+        run: >-
+          uvx semgrep==1.178.0 scan
+          --metrics=off
+          --config p/python
+          --config p/dockerfile
+          --config p/github-actions
+          --config p/terraform
+          --config p/secrets
+          --error
+          --sarif-output=semgrep.sarif
+
+      - name: Upload SARIF
+        if: ${{ !cancelled() && hashFiles('semgrep.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  trivy:
+    name: Trivy (image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      TRIVY_VERSION: "0.74.0"
+      TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Trivy from the release archive, checked against a pinned checksum
+      # (the same version and checksum as the shared container workflow).
+      - name: Install Trivy
+        run: |
+          set -euo pipefail
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${archive}"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/bin" trivy
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Build image
+        run: docker build --tag "oidc-lab:${GITHUB_SHA}" app
+
+      # Gate on what can be fixed: HIGH and CRITICAL with a released fix.
+      # Fixes for the rest arrive through Dependabot base-image digest bumps.
+      - name: Trivy image scan
+        run: >-
+          trivy image --no-progress
+          --severity CRITICAL,HIGH --ignore-unfixed
+          --format sarif --output trivy.sarif --exit-code 1
+          "oidc-lab:${GITHUB_SHA}"
+
+      - name: Upload SARIF
+        if: ${{ !cancelled() && hashFiles('trivy.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image
+
+  checkov:
+    name: Checkov (infra)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      # Skips live next to the resource with their reason (infra/terraform/main.tf).
+      - name: Checkov scan
+        run: >-
+          uvx checkov==3.3.19
+          --directory infra/terraform
+          --directory examples/gitlab-ci/terraform
+          --directory examples/codepipeline/terraform
+          --framework terraform
+          --quiet --compact
+          --output cli --output sarif
+          --output-file-path console,checkov.sarif
+
+      - name: Upload SARIF
+        if: ${{ !cancelled() && hashFiles('checkov.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: checkov.sarif
+          category: checkov-infra

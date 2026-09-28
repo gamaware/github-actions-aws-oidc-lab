@@ -1,0 +1,423 @@
+#!/usr/bin/env bash
+# Live test of the CodePipeline path: create the deploy target and the
+# pipeline in a real AWS account, run the pipeline end to end, check the roles
+# with the IAM policy simulator, then destroy everything. Manual only; CI
+# never runs it.
+#
+#   make test-live-codepipeline               # uses the AWS CLI profile "dev"
+#   AWS_PROFILE_LIVE=sandbox make test-live-codepipeline
+#   TEST_LIVE_CONFIRM=yes skips the confirmation prompt after the identity check.
+#   TEST_LIVE_EXTRA_TAGS="Owner=you,Team=platform" adds tags that an SCP may
+#   require on every create.
+#
+# What it does:
+#   1. prints the caller identity so the operator can confirm the account;
+#   2. copies the live network root (tests/live/terraform), infra/terraform
+#      and examples/codepipeline/terraform to a temporary directory (no state
+#      lands in the repository) and applies them in that order with the tag
+#      purpose = portfolio-test on every resource. Before each apply, the
+#      private-only pre-flight runs terraform plan -out with the exact live
+#      variables, terraform show -json and scripts/check_private_plan.py; a
+#      plan with anything internet-facing stops the run before that root is
+#      applied, and the saved plan is what gets applied. The network is a
+#      dedicated VPC with private subnets only, no internet or NAT gateway, and
+#      VPC endpoints for ECR, S3 and CloudWatch Logs. The ECS service runs one
+#      task with no public IP and no inbound rule, with the settings in
+#      tests/live/deploy-target.tfvars.json. The pipeline uses the S3 source,
+#      so no GitHub connection handshake is needed;
+#   3. uploads `git archive HEAD` as the source zip and starts the pipeline;
+#   4. asks the IAM policy simulator what each pipeline role can and cannot do;
+#   5. approves the Approve stage once the build has pushed the image, and
+#      waits for Deploy and Verify to succeed. Health is read through the ECS
+#      API only: the Verify stage runs scripts/verify-deployment.sh (PRIMARY
+#      deployment, rollout state, task health from the container health
+#      check), and nothing calls the service over the network;
+#   6. on exit, success or failure, deregisters the task definition revisions
+#      the pipeline registered, destroys both stacks and the network and checks
+#      that no resource tagged purpose = portfolio-test remains.
+#
+# Needs: terraform, python3, the AWS CLI, git, and permissions to create a VPC
+# with VPC endpoints, IAM roles, KMS keys, S3 buckets, CodeBuild projects and
+# pipelines. Takes about
+# 15 minutes. Only committed files are built: commit before running it.
+# Never commit output from this script.
+
+set -euo pipefail
+
+PROFILE="${AWS_PROFILE_LIVE:-dev}"
+REGION="${AWS_REGION_LIVE:-us-east-1}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUN_ID="$(openssl rand -hex 3)"
+NAME="cp-live-$RUN_ID"
+WORK="$(mktemp -d)"
+NETWORK_ROOT="$WORK/tests/live/terraform"
+TARGET_ROOT="$WORK/infra/terraform"
+PIPELINE_ROOT="$WORK/examples/codepipeline/terraform"
+TARGET_VARS_FILE="$REPO_ROOT/tests/live/deploy-target.tfvars.json"
+TAG_KEY="purpose"
+TAG_VALUE="portfolio-test"
+WAIT_SECONDS="${WAIT_SECONDS:-1800}"
+failures=0
+
+aws_() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
+tf() { terraform -chdir="$1" "${@:2}"; }
+
+# preflight ROOT LABEL VAR_ARGS...: plans ROOT with exactly the variables the
+# apply uses, writes the plan's JSON form to the run's temporary directory and
+# refuses the run if scripts/check_private_plan.py finds anything
+# internet-facing. Nothing is applied for ROOT when it fails.
+preflight() {
+  local root="$1" label="$2"
+  echo "--- Pre-flight: private-only check of the $label plan"
+  tf "$root" plan -input=false -no-color -out="$WORK/$label.tfplan" "${@:3}" >/dev/null
+  tf "$root" show -json "$WORK/$label.tfplan" >"$WORK/$label.plan.json"
+  python3 "$REPO_ROOT/scripts/check_private_plan.py" "$WORK/$label.plan.json" ||
+    { echo "::error::The $label plan would create internet-facing resources; nothing was applied for it."; exit 1; }
+}
+
+# apply_checked ROOT LABEL: applies exactly the plan the pre-flight checked.
+apply_checked() { tf "$1" apply -input=false -no-color "$WORK/$2.tfplan" >/dev/null; }
+
+# Static keys in the environment would take precedence over the profile for
+# Terraform and could point at another account.
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE
+
+echo "Caller identity for profile $PROFILE:"
+aws_ sts get-caller-identity --output table
+if [[ "${TEST_LIVE_CONFIRM:-}" != "yes" ]]; then
+  read -r -p "Create, run and destroy a test pipeline in this account and $REGION? Type yes: " answer
+  [[ "$answer" == "yes" ]] || { echo "Stopped."; exit 1; }
+fi
+
+# Removes the provider from Terraform state, so destroy leaves it in place,
+# when a role outside this run trusts it: another stack or session may have
+# started to use the provider this run created. Also keeps it when the roles
+# cannot be listed.
+keep_shared_provider() {
+  local root="$1" address="$2" host="$3" others
+  if others="$(aws_ iam list-roles --output text \
+    --query "Roles[?contains(to_string(AssumeRolePolicyDocument), '$host') && !starts_with(RoleName, '$NAME-')].RoleName")" &&
+    [[ -z "${others//[$'\t\n ']/}" || "$others" == "None" ]]; then
+    return 1
+  fi
+  tf "$root" state rm -no-color "$address" >/dev/null
+  echo "Left the $host OIDC provider in place: other roles trust it (${others:-could not list roles})."
+}
+
+teardown() {
+  local status=$?
+  # Also +u: bash 3.2 (macOS) treats an empty array expansion as unbound.
+  set +eu
+  local destroyed=true
+  # Stop running executions first, so the ECS deploy action cannot register a
+  # revision after the ones below are deregistered.
+  [[ -n "${pipeline:-}" ]] && stop_executions
+  echo "--- Deregistering task definition revisions of $NAME"
+  local revisions=()
+  read -r -a revisions <<<"$(aws_ ecs list-task-definitions --family-prefix "$NAME" --status ACTIVE \
+    --query 'taskDefinitionArns[]' --output text)"
+  for arn in "${revisions[@]}"; do
+    [[ "$arn" == "None" ]] || aws_ ecs deregister-task-definition --task-definition "$arn" >/dev/null
+  done
+
+  echo "--- Destroying the test stacks"
+  if [[ -f "$PIPELINE_ROOT/terraform.tfstate" ]]; then
+    tf "$PIPELINE_ROOT" destroy -auto-approve -input=false -no-color "${pipeline_vars[@]}" >/dev/null ||
+      { echo "::error::terraform destroy failed for the pipeline stack; clean up resources named $NAME by hand."; destroyed=false; }
+  fi
+  if [[ -f "$TARGET_ROOT/terraform.tfstate" ]]; then
+    if [[ "$github_provider" == true ]] &&
+      keep_shared_provider "$TARGET_ROOT" 'aws_iam_openid_connect_provider.github[0]' token.actions.githubusercontent.com; then
+      github_provider=false
+    fi
+    tf "$TARGET_ROOT" destroy -auto-approve -input=false -no-color "${target_vars[@]}" >/dev/null ||
+      { echo "::error::terraform destroy failed for the deploy target; clean up resources named $NAME by hand."; destroyed=false; }
+  fi
+  if [[ -f "$NETWORK_ROOT/terraform.tfstate" ]]; then
+    tf "$NETWORK_ROOT" destroy -auto-approve -input=false -no-color "${network_vars[@]}" >/dev/null ||
+      { echo "::error::terraform destroy failed for the live network; clean up the VPC tagged Project=$NAME by hand."; destroyed=false; }
+  fi
+
+  echo "--- Checking that nothing tagged $TAG_KEY=$TAG_VALUE remains"
+  local leftovers="" tagged
+  for _ in 1 2 3 4 5 6; do
+    # Both roots tag every resource with Project = the run's name; KMS key
+    # ARNs do not contain the name, so filter on the tag, not on the ARN.
+    if ! tagged="$(aws_ resourcegroupstaggingapi get-resources \
+      --tag-filters "Key=$TAG_KEY,Values=$TAG_VALUE" "Key=Project,Values=$NAME" \
+      --query 'ResourceTagMappingList[].ResourceARN' --output text)"; then
+      leftovers="(the tagging API call failed; check the account by hand)"
+      break
+    fi
+    leftovers="$(tr '\t' '\n' <<<"$tagged" | grep -v '^None$' |
+      while read -r arn; do
+        # A destroyed KMS key waits out its deletion window; ECS clusters and
+        # services and task definitions stay visible as INACTIVE. None is a leftover.
+        case "$arn" in
+          *:kms:*)
+            state="$(aws_ kms describe-key --key-id "$arn" --query KeyMetadata.KeyState --output text)"
+            [[ "$state" == "PendingDeletion" ]] || echo "$arn"
+            ;;
+          *:ecs:*:cluster/*)
+            state="$(aws_ ecs describe-clusters --clusters "$arn" --query 'clusters[0].status' --output text)"
+            [[ "$state" == "INACTIVE" ]] || echo "$arn"
+            ;;
+          *:ecs:*:service/*)
+            state="$(aws_ ecs describe-services --cluster "$(cut -d/ -f2 <<<"$arn")" --services "$arn" \
+              --query 'services[0].status' --output text)"
+            [[ "$state" == "INACTIVE" ]] || echo "$arn"
+            ;;
+          *:ecs:*:task-definition/*)
+            state="$(aws_ ecs describe-task-definition --task-definition "$arn" \
+              --query taskDefinition.status --output text)"
+            [[ "$state" == "INACTIVE" || "$state" == "DELETE_IN_PROGRESS" ]] || echo "$arn"
+            ;;
+          *) echo "$arn" ;;
+        esac
+      done)"
+    [[ -z "$leftovers" ]] && break
+    sleep 10
+  done
+  for role in "$NAME-codepipeline" "$NAME-codebuild-build" "$NAME-codebuild-verify" \
+    "$NAME-github-deploy" "$NAME-task-execution"; do
+    if aws_ iam get-role --role-name "$role" >/dev/null 2>&1; then
+      leftovers+=$'\n'"role/$role"
+    fi
+  done
+  local vpcs
+  if vpcs="$(aws_ ec2 describe-vpcs --filters "Name=tag:Project,Values=$NAME" --query 'Vpcs[].VpcId' --output text)"; then
+    [[ -z "${vpcs//[$'\t\n ']/}" ]] || leftovers+=$'\n'"VPC $vpcs"
+  else
+    leftovers+=$'\n'"(could not list VPCs; check for a VPC tagged Project=$NAME by hand)"
+  fi
+  if aws_ codepipeline get-pipeline --name "$NAME-pipeline" >/dev/null 2>&1; then
+    leftovers+=$'\n'"pipeline/$NAME-pipeline"
+  fi
+  if [[ "$github_provider" == true ]] &&
+    aws_ iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[].Arn' --output text |
+    tr '\t' '\n' | grep -q 'oidc-provider/token.actions.githubusercontent.com$'; then
+    leftovers+=$'\n'"GitHub OIDC provider created by this run"
+  fi
+  if [[ "$destroyed" == true ]]; then
+    rm -rf "$WORK"
+  else
+    echo "State kept in $WORK for a manual terraform destroy."
+  fi
+
+  if [[ -n "${leftovers//[$'\n ']/}" ]]; then
+    echo "::error::Resources left behind:"
+    echo "$leftovers"
+    exit 1
+  fi
+  echo "Nothing tagged $TAG_KEY=$TAG_VALUE remains for $NAME."
+  exit "$status"
+}
+# Abandons every in-progress execution of the pipeline, then waits briefly.
+stop_executions() {
+  local ids=()
+  read -r -a ids <<<"$(aws_ codepipeline list-pipeline-executions --pipeline-name "$pipeline" \
+    --query "pipelineExecutionSummaries[?status=='InProgress'].pipelineExecutionId" --output text)"
+  for id in "${ids[@]}"; do
+    [[ "$id" == "None" ]] || aws_ codepipeline stop-pipeline-execution --pipeline-name "$pipeline" \
+      --pipeline-execution-id "$id" --abandon --reason "make test-live-codepipeline" >/dev/null
+  done
+  sleep 10
+}
+network_vars=()
+target_vars=()
+pipeline_vars=()
+github_provider=false
+trap teardown EXIT
+
+# The deploy target root also defines the GitHub OIDC provider. Create it only
+# when the account has none; an existing one is read and never destroyed, and
+# one this run created stays if a role outside the run trusts it by teardown.
+providers="$(aws_ iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[].Arn' --output text)"
+github_provider=true
+tr '\t' '\n' <<<"$providers" | grep -q 'oidc-provider/token.actions.githubusercontent.com$' && github_provider=false
+
+# Same relative layout as the repository.
+mkdir -p "$WORK/infra" "$WORK/examples/codepipeline" "$WORK/tests/live"
+cp -R "$REPO_ROOT/tests/live/terraform" "$NETWORK_ROOT"
+cp -R "$REPO_ROOT/infra/terraform" "$TARGET_ROOT"
+cp -R "$REPO_ROOT/examples/codepipeline/terraform" "$PIPELINE_ROOT"
+# Only tracked configuration: no local state, variables or backend files.
+for root in "$NETWORK_ROOT" "$TARGET_ROOT" "$PIPELINE_ROOT"; do
+  rm -rf "$root/.terraform" "$root"/*.tfstate* "$root"/*.tfvars "$root"/*.tfvars.json "$root/backend.tf"
+done
+
+export AWS_PROFILE="$PROFILE" AWS_REGION="$REGION"
+tags="{\"$TAG_KEY\"=\"$TAG_VALUE\""
+if [[ -n "${TEST_LIVE_EXTRA_TAGS:-}" ]]; then
+  IFS=, read -r -a extra_tags <<<"$TEST_LIVE_EXTRA_TAGS"
+  for pair in "${extra_tags[@]}"; do
+    [[ "$pair" == ?*=* ]] || { echo "::error::TEST_LIVE_EXTRA_TAGS takes key=value pairs, got '$pair'."; exit 1; }
+    tags+=",\"${pair%%=*}\"=\"${pair#*=}\""
+  done
+fi
+tags+="}"
+
+# The task pulls from ECR and writes logs through the network's VPC
+# endpoints, so the interface endpoints are on.
+network_vars=(-var "name=$NAME" -var "aws_region=$REGION" -var "interface_endpoints=true" -var "tags=$tags")
+
+echo "--- Applying the private live network as $NAME"
+tf "$NETWORK_ROOT" init -input=false -no-color >/dev/null
+preflight "$NETWORK_ROOT" network "${network_vars[@]}"
+apply_checked "$NETWORK_ROOT" network
+vpc_id="$(tf "$NETWORK_ROOT" output -raw vpc_id)"
+subnet_ids="$(tf "$NETWORK_ROOT" output -json subnet_ids)"
+
+# assign_public_ip and ingress_cidr_blocks come only from the tracked
+# private-only settings file.
+target_vars=(
+  -var-file="$TARGET_VARS_FILE"
+  -var "name=$NAME" -var "aws_region=$REGION"
+  -var "github_owner=example-owner" -var "github_repo=example-repo"
+  -var "vpc_id=$vpc_id" -var "subnet_ids=$subnet_ids"
+  -var "create_oidc_provider=$github_provider" -var "desired_count=1" -var "tags=$tags"
+)
+
+echo "--- Applying the deploy target as $NAME"
+tf "$TARGET_ROOT" init -input=false -no-color >/dev/null
+preflight "$TARGET_ROOT" target "${target_vars[@]}"
+apply_checked "$TARGET_ROOT" target
+
+out() { tf "$TARGET_ROOT" output -raw "$1"; }
+ecr_arn="$(out ecr_repository_arn)"
+service_arn="$(out ecs_service_arn)"
+execution_arn="$(out execution_role_arn)"
+cluster_arn="$(out ecs_cluster_arn)"
+
+pipeline_vars=(
+  -var "name=$NAME" -var "aws_region=$REGION" -var "source_type=s3"
+  -var "ecr_repository_arn=$ecr_arn" -var "ecs_cluster_arn=$cluster_arn"
+  -var "ecs_service_arn=$service_arn" -var "execution_role_arn=$execution_arn"
+  -var "task_definition_family=$NAME" -var "artifact_bucket_force_destroy=true" -var "tags=$tags"
+)
+
+echo "--- Applying the pipeline stack"
+tf "$PIPELINE_ROOT" init -input=false -no-color >/dev/null
+preflight "$PIPELINE_ROOT" pipeline "${pipeline_vars[@]}"
+apply_checked "$PIPELINE_ROOT" pipeline
+pout() { tf "$PIPELINE_ROOT" output -raw "$1"; }
+pipeline="$(pout pipeline_name)"
+bucket="$(pout artifact_bucket)"
+pipeline_role="$(pout pipeline_role_arn)"
+build_role="$(pout build_role_arn)"
+verify_role="$(pout verify_role_arn)"
+
+# expect ROLE_ARN ACTION RESOURCE DECISION [CONTEXT_ENTRY]
+expect() {
+  local role="$1" action="$2" resource="$3" want="$4"
+  local args=(--policy-source-arn "$role" --action-names "$action" --resource-arns "$resource")
+  if [[ $# -ge 5 ]]; then
+    args+=(--context-entries "$5")
+  fi
+  local got
+  got="$(aws_ iam simulate-principal-policy "${args[@]}" \
+    --query 'EvaluationResults[0].EvalDecision' --output text)"
+  if [[ "$got" == "$want" ]]; then
+    echo "ok    ${role##*/}  $action  ${resource##*:}  $got"
+  elif [[ "$want" == implicitDeny && "$got" == explicitDeny ]]; then
+    # An SCP on the account can deny the action too; the role still cannot do it.
+    echo "ok    ${role##*/}  $action  ${resource##*:}  $got (denied outside the role's policy)"
+  else
+    echo "FAIL  ${role##*/}  $action  ${resource##*:}  got $got, expected $want"
+    failures=$((failures + 1))
+  fi
+}
+
+passed_to_ecs="ContextKeyName=iam:PassedToService,ContextKeyValues=ecs-tasks.amazonaws.com,ContextKeyType=string"
+passed_to_lambda="ContextKeyName=iam:PassedToService,ContextKeyValues=lambda.amazonaws.com,ContextKeyType=string"
+other_repo="${ecr_arn%/*}/not-$NAME"
+other_service="${service_arn%/*}/other-service"
+
+echo "--- IAM policy simulator"
+expect "$build_role" ecr:PutImage "$ecr_arn" allowed
+expect "$build_role" ecr:PutImage "$other_repo" implicitDeny
+expect "$build_role" ecs:UpdateService "$service_arn" implicitDeny
+expect "$build_role" iam:PassRole "$execution_arn" implicitDeny "$passed_to_ecs"
+expect "$pipeline_role" ecs:UpdateService "$service_arn" allowed
+expect "$pipeline_role" ecs:UpdateService "$other_service" implicitDeny
+expect "$pipeline_role" ecr:PutImage "$ecr_arn" implicitDeny
+expect "$pipeline_role" iam:PassRole "$execution_arn" allowed "$passed_to_ecs"
+expect "$pipeline_role" iam:PassRole "$execution_arn" implicitDeny "$passed_to_lambda"
+expect "$verify_role" ecs:DescribeServices "$service_arn" allowed
+expect "$verify_role" ecs:UpdateService "$service_arn" implicitDeny
+for role in "$pipeline_role" "$build_role" "$verify_role"; do
+  expect "$role" iam:CreateRole "$execution_arn" implicitDeny
+  expect "$role" s3:ListAllMyBuckets "*" implicitDeny
+done
+
+echo "--- Uploading the committed source and starting $pipeline"
+# A new pipeline starts once on its own, before the source zip exists. Stop
+# it, so it cannot pick up the zip and hold the Approve stage.
+stop_executions
+git -C "$REPO_ROOT" archive --format=zip --output "$WORK/source.zip" HEAD
+aws_ s3 cp "$WORK/source.zip" "s3://$bucket/source/source.zip" --only-show-errors
+execution_id="$(aws_ codepipeline start-pipeline-execution --name "$pipeline" \
+  --query pipelineExecutionId --output text)"
+
+execution_status() {
+  aws_ codepipeline get-pipeline-execution --pipeline-name "$pipeline" \
+    --pipeline-execution-id "$execution_id" --query pipelineExecution.status --output text
+}
+
+# approval_state prints "<execution id> <status> <token>" for the Approve action.
+approval_state() {
+  aws_ codepipeline get-pipeline-state --name "$pipeline" \
+    --query "stageStates[?stageName=='Approve'] | [0].[latestExecution.pipelineExecutionId, actionStates[0].latestExecution.status, actionStates[0].latestExecution.token]" \
+    --output text
+}
+
+echo "--- Waiting for Build to finish and Approve to open"
+deadline=$((SECONDS + WAIT_SECONDS))
+token=""
+while ((SECONDS < deadline)); do
+  status="$(execution_status)"
+  [[ "$status" == "InProgress" ]] || { echo "::error::Execution $execution_id ended as $status before the approval."; exit 1; }
+  read -r approve_execution approve_status approve_token <<<"$(approval_state)"
+  if [[ "$approve_execution" == "$execution_id" && "$approve_status" == "InProgress" ]]; then
+    token="$approve_token"
+    break
+  fi
+  sleep 20
+done
+[[ -n "$token" && "$token" != "None" ]] || { echo "::error::Approve did not open within $WAIT_SECONDS seconds."; exit 1; }
+
+echo "--- Approving the deploy"
+aws_ codepipeline put-approval-result --pipeline-name "$pipeline" --stage-name Approve \
+  --action-name ProductionApproval --token "$token" \
+  --result "summary=Approved by make test-live-codepipeline,status=Approved" >/dev/null
+
+echo "--- Waiting for Deploy and Verify"
+status="InProgress"
+while ((SECONDS < deadline)) && [[ "$status" == "InProgress" ]]; do
+  sleep 20
+  status="$(execution_status)"
+done
+if [[ "$status" == "Succeeded" ]]; then
+  echo "ok    pipeline execution $execution_id Succeeded"
+else
+  echo "FAIL  pipeline execution $execution_id ended as $status"
+  failures=$((failures + 1))
+fi
+
+echo "--- Deployed image"
+deployed_task_definition="$(aws_ ecs describe-services --cluster "${cluster_arn##*/}" --services "${service_arn##*/}" \
+  --query "services[0].deployments[?status=='PRIMARY'] | [0].taskDefinition" --output text)"
+deployed_image="$(aws_ ecs describe-task-definition --task-definition "$deployed_task_definition" \
+  --query 'taskDefinition.containerDefinitions[0].image' --output text)"
+if [[ "$deployed_image" =~ @sha256:[0-9a-f]{64}$ ]]; then
+  echo "ok    service runs ${deployed_image##*/}"
+else
+  echo "FAIL  service runs $deployed_image, not an image by digest"
+  failures=$((failures + 1))
+fi
+
+if ((failures > 0)); then
+  echo "::error::$failures live check(s) failed."
+  exit 1
+fi
+echo "All live checks passed."

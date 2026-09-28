@@ -1,0 +1,8 @@
+# Extend the default rules. The detect-secrets baseline stores hashes of known false positives
+# (SHA-256 checksums of pinned tool releases), which gitleaks would otherwise report as keys.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "detect-secrets baseline hashes"
+paths = ['''^\.secrets\.baseline$''']

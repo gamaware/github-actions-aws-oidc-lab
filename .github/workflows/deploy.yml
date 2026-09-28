@@ -1,0 +1,222 @@
+name: deploy
+
+# Build once, deploy by digest (docs/adr/0005-build-once-deploy-by-digest.md):
+#   build   builds the image once as an OCI archive, gates it with Trivy,
+#           records an SBOM and a build-provenance attestation. No AWS access.
+#   deploy  after the production reviewer approves: pushes that exact archive,
+#           checks the pushed digest and the attestation, deploys
+#           image@sha256:<digest> to ECS and verifies the new tasks are healthy.
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# One deploy at a time: a newer push queues instead of cancelling a running
+# rollout. GitHub keeps only the newest queued run, so an older queued one is
+# replaced, which is fine because it would deploy an older commit.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build, scan and attest the image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Sigstore signing for the attestations. This job has no environment,
+      # so its token subject is a ref subject, which the deploy role refuses.
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    env:
+      ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+      TRIVY_VERSION: "0.74.0"
+      TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Trivy from the release archive, checked against a pinned checksum
+      # (the same version and checksum as the shared container workflow).
+      - name: Install Trivy
+        run: |
+          set -euo pipefail
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${archive}"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/bin" trivy
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # No BuildKit provenance or SBOM here: they would wrap the manifest in an
+      # index. Provenance and SBOM are attested separately below, against the
+      # manifest digest that ECS will run.
+      - name: Build the image once, as an OCI archive
+        id: build
+        run: |
+          docker buildx build app \
+            --provenance=false \
+            --sbom=false \
+            --output type=oci,dest=image.tar \
+            --metadata-file metadata.json
+          digest="$(jq -r '."containerimage.digest"' metadata.json)"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::No image digest in build metadata."; exit 1; }
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          # Trivy reads an OCI image as a layout directory, not as a tar.
+          mkdir oidc-lab-oci
+          tar -xf image.tar -C oidc-lab-oci
+
+      - name: Trivy gate on the archive that ships
+        run: >-
+          trivy image --input oidc-lab-oci --no-progress
+          --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1
+
+      - name: SBOM (CycloneDX)
+        run: trivy image --input oidc-lab-oci --no-progress --format cyclonedx --output sbom.cdx.json
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ vars.ECR_REPOSITORY_URL }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+
+      - name: Attest the SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ vars.ECR_REPOSITORY_URL }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: sbom.cdx.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image
+          path: image.tar
+          retention-days: 1
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          if-no-files-found: error
+
+  deploy:
+    name: Push and deploy by digest
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The environment adds the required reviewer and makes the OIDC subject
+    # repo:OWNER/REPO:environment:production, the only one the role trusts.
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+      attestations: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+      ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+      ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY }}
+      DIGEST: ${{ needs.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: image
+
+      - name: Assume the deploy role with OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-session-name: gha-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      # skopeo copies the archive byte for byte (--preserve-digests), so the
+      # registry digest is the one Trivy scanned and the attestation names.
+      # Tags are immutable, so a re-run pushes the same digest under a new tag.
+      - name: Push the scanned archive and check its digest
+        run: |
+          tag="${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
+          skopeo copy --preserve-digests \
+            oci-archive:image.tar "docker://${ECR_REPOSITORY_URL}:${tag}"
+          pushed="$(skopeo inspect --format '{{.Digest}}' "docker://${ECR_REPOSITORY_URL}:${tag}")"
+          if [[ "$pushed" != "$DIGEST" ]]; then
+            echo "::error::Registry digest ${pushed} differs from the built digest ${DIGEST}."
+            exit 1
+          fi
+          echo "Pushed ${ECR_REPOSITORY_URL}@${DIGEST} as ${tag}."
+
+      - name: Verify the build-provenance attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify "oci://${ECR_REPOSITORY_URL}@${DIGEST}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/deploy.yml" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+
+      - name: Fetch the current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_FAMILY" \
+            --query taskDefinition > task-definition.json
+
+      - name: Render the task definition with the image digest
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@138c24f321fdbdf7edee4a685519d253cae2cdea # v1.9.0
+        with:
+          task-definition: task-definition.json
+          container-name: app
+          image: ${{ vars.ECR_REPOSITORY_URL }}@${{ needs.build.outputs.digest }}
+          environment-variables: APP_VERSION=${{ github.sha }}
+
+      - name: Deploy to ECS and wait for a stable service
+        id: deploy
+        uses: aws-actions/amazon-ecs-deploy-task-definition@c465972ecbd160473f22e683363b422a5412a3de # v2.6.3
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          cluster: ${{ vars.ECS_CLUSTER }}
+          service: ${{ vars.ECS_SERVICE }}
+          wait-for-service-stability: true
+          wait-for-minutes: 10
+
+      # "Stable" also happens after a circuit-breaker rollback, so check that
+      # the new revision is PRIMARY and its tasks are healthy on this digest.
+      - name: Verify the deployment
+        env:
+          EXPECTED_TASK_DEFINITION: ${{ steps.deploy.outputs.task-definition-arn }}
+          EXPECTED_IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          APP_URL: ${{ vars.APP_URL }}
+          EXPECTED_VERSION: ${{ github.sha }}
+        run: ./scripts/verify-deployment.sh
+
+      - name: Record what was deployed
+        env:
+          TASK_DEFINITION: ${{ steps.deploy.outputs.task-definition-arn }}
+        run: |
+          {
+            echo "### Deployed to production"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Image | \`${ECR_REPOSITORY_URL}@${DIGEST}\` |"
+            echo "| Task definition | \`${TASK_DEFINITION}\` |"
+            echo "| Run | ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} |"
+          } >> "$GITHUB_STEP_SUMMARY"
