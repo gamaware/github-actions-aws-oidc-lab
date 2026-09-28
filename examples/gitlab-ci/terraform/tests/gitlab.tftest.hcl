@@ -172,3 +172,33 @@ run "issuer_with_path_is_rejected" {
 
   expect_failures = [var.gitlab_url]
 }
+
+run "wildcard_execution_role_is_rejected" {
+  command = plan
+
+  variables {
+    execution_role_arn = "*"
+  }
+
+  expect_failures = [var.execution_role_arn]
+}
+
+run "wildcard_task_definition_family_is_rejected" {
+  command = plan
+
+  variables {
+    task_definition_family = "*"
+  }
+
+  expect_failures = [var.task_definition_family]
+}
+
+run "wildcard_repository_arn_is_rejected" {
+  command = plan
+
+  variables {
+    ecr_repository_arn = "arn:aws:ecr:us-east-1:111122223333:repository/*"
+  }
+
+  expect_failures = [var.ecr_repository_arn]
+}

@@ -251,6 +251,11 @@ run "roles_name_every_action_and_scope_their_resources" {
   }
 
   assert {
+    condition     = one([for s in jsondecode(aws_iam_role_policy.pipeline.policy).Statement : s.Condition.Null["ecs:compute-compatibility"] if s.Sid == "EcsRegisterOneFamily"]) == "false"
+    error_message = "ecs:RegisterTaskDefinition must require the compute-compatibility key."
+  }
+
+  assert {
     condition     = one([for s in jsondecode(aws_iam_role_policy.pipeline.policy).Statement : s.Resource if s.Sid == "EcsUpdateOneService"]) == var.ecs_service_arn
     error_message = "The pipeline may update one ECS service only."
   }
@@ -324,4 +329,37 @@ run "wildcard_branch_is_rejected" {
   }
 
   expect_failures = [var.source_branch]
+}
+
+run "wildcard_execution_role_is_rejected" {
+  command = plan
+
+  variables {
+    execution_role_arn = "*"
+  }
+
+  expect_failures = [var.execution_role_arn]
+}
+
+run "wildcard_task_definition_family_is_rejected" {
+  command = plan
+
+  variables {
+    task_definition_family = "*"
+  }
+
+  expect_failures = [var.task_definition_family]
+}
+
+run "repository_name_with_a_path_is_kept_whole" {
+  command = apply
+
+  variables {
+    ecr_repository_arn = "arn:aws:ecr:us-east-1:111122223333:repository/team/app"
+  }
+
+  assert {
+    condition     = local.ecr_repository_name == "team/app"
+    error_message = "A repository name with a path must be kept whole."
+  }
 }

@@ -36,8 +36,24 @@ FORBIDDEN_TYPES = {
 
 PUBLIC_ACLS = {"public-read", "public-read-write", "authenticated-read"}
 
-# Resource policies that could grant access to anyone: an Allow to "*" without a Condition is refused.
+# Resource policies that could grant access to anyone: an Allow to "*" is refused unless a Condition limits the
+# caller to an account, organization, principal, source resource or VPC.
 POLICY_TYPES = {"aws_s3_bucket_policy", "aws_ecr_repository_policy", "aws_ecrpublic_repository_policy"}
+
+# Condition keys that tie a statement to known callers. aws:SecureTransport, aws:SourceIp and similar keys do not:
+# anyone on the internet can meet them.
+RESTRICTING_CONDITION_KEYS = {
+    "aws:principalaccount",
+    "aws:principalarn",
+    "aws:principalorgid",
+    "aws:principalorgpaths",
+    "aws:sourceaccount",
+    "aws:sourcearn",
+    "aws:sourceorgid",
+    "aws:sourceorgpaths",
+    "aws:sourcevpc",
+    "aws:sourcevpce",
+}
 
 PUBLICLY_ACCESSIBLE_TYPES = {
     "aws_db_instance",
@@ -73,7 +89,7 @@ def _default_route_via_gateway(route: dict[str, Any], unknown: dict[str, Any]) -
 
 
 def _allows_anyone(policy: Any) -> bool:
-    """True when a policy document has an Allow statement for any principal ("*") and no Condition."""
+    """True when a policy document has an Allow statement for any principal ("*") that no Condition key limits."""
     if not isinstance(policy, str) or not policy:
         return False
     try:
@@ -86,9 +102,20 @@ def _allows_anyone(policy: Any) -> bool:
     for statement in statements:
         principal = statement.get("Principal")
         anyone = principal == "*" or (isinstance(principal, dict) and "*" in _as_list(principal.get("AWS")))
-        if statement.get("Effect") == "Allow" and anyone and not statement.get("Condition"):
+        if statement.get("Effect") == "Allow" and anyone and not _limits_callers(statement.get("Condition")):
             return True
     return False
+
+
+def _limits_callers(condition: Any) -> bool:
+    if not isinstance(condition, dict):
+        return False
+    return any(
+        isinstance(block, dict) and any(key.lower() in RESTRICTING_CONDITION_KEYS for key in block)
+        for operator, block in condition.items()
+        # Negated, Null and IfExists operators let callers without the key through.
+        if "Not" not in operator and operator != "Null" and not operator.endswith("IfExists")
+    )
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -121,9 +148,15 @@ def violations(plan: dict[str, Any]) -> list[str]:
             if after.get("cidr_ipv4") in WORLD or after.get("cidr_ipv6") in WORLD:
                 found.append(f"{address}: ingress from 0.0.0.0/0 or ::/0 on port {after.get('from_port')}")
         elif rtype == "aws_ecs_service":
-            for net in after.get("network_configuration") or []:
-                if net.get("assign_public_ip"):
+            # A value known only after apply could be true, so it is refused like true.
+            nets_unknown = unknown.get("network_configuration")
+            for i, net in enumerate(after.get("network_configuration") or []):
+                net_unknown = nets_unknown[i] if isinstance(nets_unknown, list) and i < len(nets_unknown) else {}
+                maybe_public = isinstance(net_unknown, dict) and net_unknown.get("assign_public_ip")
+                if net.get("assign_public_ip") or maybe_public:
                     found.append(f"{address}: ECS tasks must run with assign_public_ip = false")
+            if nets_unknown is True:
+                found.append(f"{address}: ECS network configuration is unknown until apply")
         elif rtype == "aws_subnet" and after.get("map_public_ip_on_launch"):
             found.append(f"{address}: subnet maps public IP addresses on launch")
         elif rtype == "aws_instance" and after.get("associate_public_ip_address"):
@@ -134,6 +167,10 @@ def violations(plan: dict[str, Any]) -> list[str]:
             found.append(f"{address}: default route to the internet")
         elif rtype in ("aws_route_table", "aws_default_route_table"):
             routes_unknown = unknown.get("route")
+            unknown_list = isinstance(routes_unknown, list) and any(routes_unknown) and not after.get("route")
+            if routes_unknown is True or unknown_list:
+                found.append(f"{address}: routes are unknown until apply")
+                continue
             for i, route in enumerate(after.get("route") or []):
                 route_unknown = (
                     routes_unknown[i] if isinstance(routes_unknown, list) and i < len(routes_unknown) else {}

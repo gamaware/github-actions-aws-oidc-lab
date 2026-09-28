@@ -24,7 +24,12 @@ in effect, what any deployed image can do.
 
 ## Consequences
 
-- A compromised container has no AWS credentials to steal from the task metadata endpoint.
+- A compromised container has no AWS credentials to steal from the task metadata endpoint, as long as the task
+  definition names no task role.
+- The deploy role can still pass the execution role as `taskRoleArn`. IAM has no condition key that tells the two
+  fields apart, so a deploy job that registers it there gives the container the execution role's access: image pulls
+  from the one repository and log writes to the one log group. That residual access is accepted; the reviewer of the
+  `production` environment is the control for task definition changes.
 - A pull request cannot quietly give the app AWS access by adding `taskRoleArn` to the task definition: the deploy
   role cannot pass any other role, so the registration fails.
 - An app that needs AWS access later needs a new role, a change to the PassRole statement, and a new ADR.

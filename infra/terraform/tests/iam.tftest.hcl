@@ -188,6 +188,15 @@ run "deploy_permissions_have_no_wildcard_actions_and_few_wildcard_resources" {
     error_message = "iam:PassRole must be limited to ecs-tasks.amazonaws.com."
   }
 
+  # ForAllValues is true when the key is absent, so the Null condition makes
+  # requiresCompatibilities mandatory for the Fargate-only restriction.
+  assert {
+    condition = one([
+      for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s.Condition.Null["ecs:compute-compatibility"] if s.Sid == "EcsRegisterOneFamily"
+    ]) == "false"
+    error_message = "ecs:RegisterTaskDefinition must require the compute-compatibility key."
+  }
+
   assert {
     condition     = length(aws_iam_role_policy.plan) == 0 && length(aws_iam_role.plan) == 0
     error_message = "The plan role must be off by default."

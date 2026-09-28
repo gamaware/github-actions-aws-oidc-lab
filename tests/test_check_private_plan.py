@@ -47,6 +47,42 @@ ACCOUNT_PULL = json.dumps(
     {"Statement": [{"Effect": "Allow", "Principal": {"AWS": "arn:aws:iam::111122223333:root"}, "Action": "ecr:*"}]}
 )
 OPEN_READ = json.dumps({"Statement": [{"Effect": "Allow", "Principal": "*", "Action": "s3:GetObject"}]})
+ORG_READ = json.dumps(
+    {
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Condition": {"StringEquals": {"aws:PrincipalOrgID": "o-exampleorgid"}},
+            }
+        ]
+    }
+)
+TLS_ONLY_READ = json.dumps(
+    {
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Condition": {"Bool": {"aws:SecureTransport": "true"}},
+            }
+        ]
+    }
+)
+NOT_ACCOUNT_READ = json.dumps(
+    {
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Condition": {"StringNotEquals": {"aws:PrincipalAccount": "111122223333"}},
+            }
+        ]
+    }
+)
 OPEN_PULL = json.dumps({"Statement": {"Effect": "Allow", "Principal": {"AWS": ["*"]}, "Action": "ecr:BatchGetImage"}})
 
 PRIVATE = plan(
@@ -62,6 +98,8 @@ PRIVATE = plan(
     ("aws_s3_bucket_public_access_block", "b", dict.fromkeys(BLOCK_KEYS, True), None),
     ("aws_s3_bucket_policy", "tls", {"policy": DENY_INSECURE}, None),
     ("aws_ecr_repository_policy", "pull", {"policy": ACCOUNT_PULL}, None),
+    ("aws_s3_bucket_policy", "org", {"policy": ORG_READ}, None),
+    ("aws_route_table", "empty", {"route": []}, {"route": []}),
 )
 
 
@@ -107,6 +145,16 @@ class InternetFacing(unittest.TestCase):
         "Route 53 health check": ("aws_route53_health_check", {"type": "HTTPS"}, None),
         "public EKS endpoint": ("aws_eks_cluster", {"vpc_config": [{"endpoint_public_access": True}]}, None),
         "public S3 bucket policy": ("aws_s3_bucket_policy", {"policy": OPEN_READ}, None),
+        "public policy with a transport condition": ("aws_s3_bucket_policy", {"policy": TLS_ONLY_READ}, None),
+        "public policy with a negated condition": ("aws_s3_bucket_policy", {"policy": NOT_ACCOUNT_READ}, None),
+        "ECS public IP unknown until apply": (
+            "aws_ecs_service",
+            {"network_configuration": [{"subnets": ["subnet-1"]}]},
+            {"network_configuration": [{"assign_public_ip": True}]},
+        ),
+        "ECS network unknown until apply": ("aws_ecs_service", {}, {"network_configuration": True}),
+        "routes unknown until apply": ("aws_route_table", {}, {"route": True}),
+        "route list unknown until apply": ("aws_route_table", {"route": []}, {"route": [{"gateway_id": True}]}),
         "public ECR policy": ("aws_ecr_repository_policy", {"policy": OPEN_PULL}, None),
         "ECR Public repository": ("aws_ecrpublic_repository", {"repository_name": "x"}, None),
         "S3 website": ("aws_s3_bucket_website_configuration", {}, None),

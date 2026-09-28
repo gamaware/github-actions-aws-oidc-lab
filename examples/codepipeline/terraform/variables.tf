@@ -123,9 +123,19 @@ variable "ecs_service_arn" {
 variable "execution_role_arn" {
   description = "ARN of the task execution role, the only role the pipeline may pass to ECS."
   type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$", var.execution_role_arn))
+    error_message = "Use the full execution role ARN, no wildcards."
+  }
 }
 
 variable "task_definition_family" {
   description = "Task definition family the Deploy stage registers revisions in."
   type        = string
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_-]{1,255}$", var.task_definition_family))
+    error_message = "Use the exact task definition family: letters, digits, '_' and '-' only, no wildcards."
+  }
 }

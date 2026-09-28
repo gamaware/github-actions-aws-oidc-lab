@@ -42,3 +42,15 @@ def test_unknown_path_is_404(base_url):
     with pytest.raises(urllib.error.HTTPError) as exc:
         get(f"{base_url}/nope")
     assert exc.value.code == 404
+
+
+def test_log_escapes_control_characters():
+    from server import CONTROL_CHARS
+
+    assert "a\x1bb\x7f".translate(CONTROL_CHARS) == "a\\x1bb\\x7f"
+
+
+def test_stalled_client_is_disconnected():
+    from server import Handler
+
+    assert 0 < Handler.timeout <= 30

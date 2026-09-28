@@ -58,7 +58,7 @@ This file records all notable changes to this lab. The format follows
   longer allows an exception ([ADR 0011](docs/adr/0011-plan-workflow-as-example.md)).
 - Terraform moved from `infra/` to `infra/terraform/`, and `CODEOWNERS` to the repository root.
 - `ci.yml` is a thin caller: `make verify` plus the shared `lint-docs`, `lint-actions`, `secrets`, `container` and
-  `security` workflows, pinned to commit `1255caafb08b06cc4658318c4dd48f9dea946c9e` of `gamaware/.github`.
+  `security` workflows, pinned to commit `1e2fe2d99f7772ad59b896f332557457ebcbdde9` of `gamaware/.github`.
   `lint.yml` is removed; its checks run in `make verify`. The caller jobs are `verify`, `lint-docs`, `lint-actions`,
   `secrets`, `container` and `security`, so the required check names match the other portfolio repositories (see the
   README's gates table).

@@ -7,7 +7,7 @@ locals {
   partition  = data.aws_partition.current.partition
 
   # Names and URLs derived from the ARNs that infra/terraform outputs.
-  ecr_repository_name = element(split("/", var.ecr_repository_arn), 1)
+  ecr_repository_name = element(split(":repository/", var.ecr_repository_arn), 1)
   ecr_repository_url  = "${local.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${local.ecr_repository_name}"
   cluster_name        = element(split("/", var.ecs_cluster_arn), 1)
   service_name        = element(split("/", var.ecs_service_arn), 2)
