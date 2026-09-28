@@ -302,6 +302,9 @@ resource "aws_codepipeline" "this" {
   pipeline_type = "V2"
   # One deploy at a time; a newer commit waits instead of replacing a rollout.
   execution_mode = "QUEUED"
+  # Also set on the resource, not only through default_tags, so CreatePipeline
+  # carries them for tag-on-create policies.
+  tags = var.tags
 
   artifact_store {
     location = aws_s3_bucket.artifacts.bucket
