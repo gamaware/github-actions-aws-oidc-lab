@@ -1,5 +1,7 @@
 # Every target except the test-live targets runs offline: no AWS account, no credentials.
-# CI runs `make verify`, so a green local run means a green verify job.
+# CI's verify job runs the same `make verify`; results match when local tool versions match the ones the README
+# lists. The other CI jobs (docs lint, gitleaks, container build and scan, Trivy on the repository, and the
+# Semgrep, Trivy image and Checkov SARIF gates in security.yml) are not part of it.
 
 UVX       ?= uvx
 TERRAFORM ?= terraform
