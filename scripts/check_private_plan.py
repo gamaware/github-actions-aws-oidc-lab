@@ -13,11 +13,16 @@ a Terraform plan. Standard library only, so it runs before any project tooling i
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections.abc import Iterator
 from typing import Any
 
 WORLD = {"0.0.0.0/0", "::/0"}
+ROUTE_DESTINATION_KEYS = ("cidr_block", "ipv6_cidr_block", "destination_cidr_block", "destination_ipv6_cidr_block")
+INTERNET_GATEWAY_KEYS = ("gateway_id", "nat_gateway_id", "egress_only_gateway_id")
+ROUTE_TABLE_TYPES = ("aws_route_table", "aws_default_route_table")
+INSTANCE_KEY = re.compile(r'\[(?:"(?:[^"\\]|\\.)*"|[^\]]*)\]')  # [0] or ["key"] in a resource address
 
 # Resource types that exist only to reach, or be reached from, the internet.
 FORBIDDEN_TYPES = {
@@ -85,11 +90,104 @@ def _default_route_via_gateway(route: dict[str, Any], unknown: dict[str, Any]) -
 
     A destination known only after apply could be a default route, so it counts as one.
     """
-    keys = ("cidr_block", "ipv6_cidr_block", "destination_cidr_block", "destination_ipv6_cidr_block")
-    destination_unknown = any(unknown.get(key) for key in keys)
-    if not destination_unknown and not any(route.get(key) in WORLD for key in keys):
+    destination_unknown = any(unknown.get(key) for key in ROUTE_DESTINATION_KEYS)
+    if not destination_unknown and not any(route.get(key) in WORLD for key in ROUTE_DESTINATION_KEYS):
         return False
-    return any(route.get(key) or unknown.get(key) for key in ("gateway_id", "nat_gateway_id", "egress_only_gateway_id"))
+    return any(route.get(key) or unknown.get(key) for key in INTERNET_GATEWAY_KEYS)
+
+
+def _config_expressions(plan: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
+    """Expressions of every resource block in the plan's configuration, keyed by address without instance keys.
+
+    None when the plan has no configuration block: then nothing can be shown to be unconfigured.
+    """
+    config = plan.get("configuration")
+    if not isinstance(config, dict):
+        return None
+    index: dict[str, dict[str, Any]] = {}
+    pending: list[tuple[str, Any]] = [("", config.get("root_module"))]
+    while pending:
+        prefix, module = pending.pop()
+        if not isinstance(module, dict):
+            continue
+        for resource in module.get("resources") or []:
+            if isinstance(resource, dict) and isinstance(resource.get("address"), str):
+                expressions = resource.get("expressions")
+                index[prefix + resource["address"]] = expressions if isinstance(expressions, dict) else {}
+        for name, call in (module.get("module_calls") or {}).items():
+            if isinstance(call, dict):
+                pending.append((f"{prefix}module.{name}.", call.get("module")))
+    return index
+
+
+def _config_address(address: str) -> str:
+    """The configuration address of a resource instance: module.a.aws_x.y for module.a[0].aws_x.y["k"]."""
+    return INSTANCE_KEY.sub("", address)
+
+
+def _tables_with_unknown_routes(plan: dict[str, Any], config: dict[str, dict[str, Any]]) -> set[str]:
+    """Route tables that a separate aws_route targets with a route that could reach the internet.
+
+    That includes a destination or gateway known only after apply: see _default_route_via_gateway.
+    """
+    tables: set[str] = set()
+    for change in plan.get("resource_changes", []):
+        if not isinstance(change, dict) or change.get("type") != "aws_route" or change.get("mode") == "data":
+            continue
+        body = change.get("change") or {}
+        after, unknown = body.get("after"), body.get("after_unknown")
+        if not isinstance(after, dict) or not isinstance(unknown, dict):
+            continue
+        if not _default_route_via_gateway(after, unknown):
+            continue
+        address = _config_address(str(change.get("address")))
+        prefix = "".join(f"{part}." for part in address.split(".")[:-2])
+        table_id = config.get(address, {}).get("route_table_id")
+        references = table_id.get("references") if isinstance(table_id, dict) else None
+        for reference in references or []:
+            parts = INSTANCE_KEY.sub("", reference).split(".") if isinstance(reference, str) else []
+            if len(parts) >= 2 and parts[0] in ROUTE_TABLE_TYPES:
+                tables.add(f"{prefix}{parts[0]}.{parts[1]}")
+    return tables
+
+
+def _routes_configured(address: str, config: dict[str, dict[str, Any]] | None, targeted: set[str]) -> bool:
+    """True unless the configuration shows a route table with no route blocks and no risky aws_route targeting it."""
+    if config is None or address not in config:
+        return True
+    expressions = config[address]
+    if "route" in expressions and not _empty_constant(expressions["route"]):
+        return True
+    return address in targeted
+
+
+def _empty_constant(expression: Any) -> bool:
+    """An expression that is a literal null or empty collection, such as route = []."""
+    return isinstance(expression, dict) and set(expression) == {"constant_value"} and not expression["constant_value"]
+
+
+def _route_table_violations(address: str, routes: list[Any], routes_unknown: Any, configured: bool) -> list[str]:
+    """Inline routes: a route known only after apply is refused, even next to known routes.
+
+    A table without route blocks gets route = unknown in an initial plan, because the provider computes the
+    attribute. That passes when no route is configured for the table (see _routes_configured).
+    """
+    if routes_unknown is True:
+        if not routes and not configured:
+            return []
+        return [f"{address}: routes are unknown until apply"]
+    unknown_list = routes_unknown if isinstance(routes_unknown, list) else []
+    found: list[str] = []
+    for i in range(max(len(routes), len(unknown_list))):
+        route = routes[i] if i < len(routes) else None
+        route_unknown = unknown_list[i] if i < len(unknown_list) else {}
+        if route_unknown is True or (route is None and route_unknown):
+            return [f"{address}: routes are unknown until apply"]
+        if not isinstance(route, dict):
+            continue
+        if _default_route_via_gateway(route, route_unknown if isinstance(route_unknown, dict) else {}):
+            found.append(f"{address}: default route to the internet")
+    return found
 
 
 def _allows_anyone(policy: Any) -> bool:
@@ -152,10 +250,14 @@ def _is_false(value: Any) -> bool:
 
 
 def _concrete(value: Any) -> bool:
-    """A non-empty list of literal values, none a wildcard pattern and none "anonymous"."""
+    """A non-empty list of literal values: no wildcard pattern, no "anonymous" and no policy variable.
+
+    A policy variable such as ${aws:PrincipalAccount} resolves to the caller's own value, so it matches every caller.
+    """
     values = _as_list(value)
     return bool(values) and all(
-        isinstance(v, str) and v and "*" not in v and "?" not in v and v.lower() != "anonymous" for v in values
+        isinstance(v, str) and v and "*" not in v and "?" not in v and "${" not in v and v.lower() != "anonymous"
+        for v in values
     )
 
 
@@ -163,26 +265,10 @@ def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else [value]
 
 
-def _route_table_violations(address: str, routes: list[Any], routes_unknown: Any) -> list[str]:
-    """Inline routes: a route known only after apply is refused, even next to known routes."""
-    if routes_unknown is True:
-        return [f"{address}: routes are unknown until apply"]
-    unknown_list = routes_unknown if isinstance(routes_unknown, list) else []
-    found: list[str] = []
-    for i in range(max(len(routes), len(unknown_list))):
-        route = routes[i] if i < len(routes) else None
-        route_unknown = unknown_list[i] if i < len(unknown_list) else {}
-        if route_unknown is True or (route is None and route_unknown):
-            return [f"{address}: routes are unknown until apply"]
-        if not isinstance(route, dict):
-            continue
-        if _default_route_via_gateway(route, route_unknown if isinstance(route_unknown, dict) else {}):
-            found.append(f"{address}: default route to the internet")
-    return found
-
-
 def violations(plan: dict[str, Any]) -> list[str]:
     found: list[str] = []
+    config = _config_expressions(plan)
+    targeted = _tables_with_unknown_routes(plan, config) if config is not None else set()
     for address, rtype, after, unknown in _resources(plan):
         if rtype in FORBIDDEN_TYPES:
             found.append(f"{address}: {FORBIDDEN_TYPES[rtype]} is internet-facing")
@@ -224,8 +310,9 @@ def violations(plan: dict[str, Any]) -> list[str]:
             found.append(f"{address}: publicly_accessible must be false")
         elif rtype == "aws_route" and _default_route_via_gateway(after, unknown):
             found.append(f"{address}: default route to the internet")
-        elif rtype in ("aws_route_table", "aws_default_route_table"):
-            found.extend(_route_table_violations(address, after.get("route") or [], unknown.get("route")))
+        elif rtype in ROUTE_TABLE_TYPES:
+            configured = _routes_configured(_config_address(address), config, targeted)
+            found.extend(_route_table_violations(address, after.get("route") or [], unknown.get("route"), configured))
         elif rtype in POLICY_TYPES and _allows_anyone(after.get("policy")):
             found.append(f"{address}: resource policy allows any principal")
         elif rtype in ("aws_s3_bucket_public_access_block", "aws_s3_account_public_access_block"):
