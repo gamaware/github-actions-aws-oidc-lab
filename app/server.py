@@ -2,6 +2,8 @@
 
 import json
 import os
+import socket
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 VERSION = os.environ.get("APP_VERSION", "dev")
@@ -15,9 +17,25 @@ class Handler(BaseHTTPRequestHandler):
 
     server_version = "oidc-lab"
     sys_version = ""
-    # Seconds a client may take to send its request; a stalled connection
-    # frees its thread instead of holding it open.
+    # Seconds a client may wait between bytes; a stalled connection frees its thread.
     timeout = 10
+    # Seconds a whole request may take. A client that trickles bytes just under the socket timeout is cut off here.
+    request_deadline = 15
+
+    def handle_one_request(self) -> None:
+        timer = threading.Timer(self.request_deadline, self._abort)
+        timer.daemon = True
+        timer.start()
+        try:
+            super().handle_one_request()
+        finally:
+            timer.cancel()
+
+    def _abort(self) -> None:
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass  # already closed by the client or by the handler
 
     def do_GET(self) -> None:  # noqa: N802 (name fixed by BaseHTTPRequestHandler)
         if self.path == "/health":

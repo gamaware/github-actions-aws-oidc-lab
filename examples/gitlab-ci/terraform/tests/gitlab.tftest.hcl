@@ -112,6 +112,15 @@ run "permissions_match_the_github_deploy_role" {
     error_message = "RegisterTaskDefinition must be limited to the lab's family."
   }
 
+  # ForAllValues is true when the key is absent, so the Null condition makes
+  # requiresCompatibilities mandatory for the Fargate-only restriction.
+  assert {
+    condition = one([
+      for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s.Condition.Null["ecs:compute-compatibility"] if s.Sid == "EcsRegisterOneFamily"
+    ]) == "false"
+    error_message = "ecs:RegisterTaskDefinition must require the compute-compatibility key."
+  }
+
   assert {
     condition = one([
       for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s.Resource if s.Sid == "PassOnlyTheExecutionRoleToEcs"

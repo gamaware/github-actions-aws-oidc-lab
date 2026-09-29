@@ -30,8 +30,8 @@ in effect, what any deployed image can do.
   fields apart, so a deploy job that registers it there gives the container the execution role's access: image pulls
   from the one repository and log writes to the one log group. That residual access is accepted; the reviewer of the
   `production` environment is the control for task definition changes.
-- A pull request cannot quietly give the app AWS access by adding `taskRoleArn` to the task definition: the deploy
-  role cannot pass any other role, so the registration fails.
+- A pull request that sets `taskRoleArn` to the execution role gives the app that role's residual access, as above. A
+  pull request that sets it to any other role fails at registration: the deploy role cannot pass a different role.
 - An app that needs AWS access later needs a new role, a change to the PassRole statement, and a new ADR.
 
 ## Compliance

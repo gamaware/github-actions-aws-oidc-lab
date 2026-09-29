@@ -112,6 +112,12 @@ FOR_ALL_VALUES_OPTIONAL_READ = allow_anyone(
     }
 )
 OPEN_PULL = json.dumps({"Statement": {"Effect": "Allow", "Principal": {"AWS": ["*"]}, "Action": "ecr:BatchGetImage"}})
+OPEN_SERVICE_PULL = json.dumps(
+    {"Statement": {"Effect": "Allow", "Principal": {"Service": "*"}, "Action": "ecr:BatchGetImage"}}
+)
+OPEN_FEDERATED_READ = json.dumps(
+    {"Statement": [{"Effect": "Allow", "Principal": {"Federated": ["*"]}, "Action": "s3:GetObject"}]}
+)
 
 PRIVATE = plan(
     ("aws_lb", "app", {"internal": True, "load_balancer_type": "application"}, None),
@@ -129,6 +135,12 @@ PRIVATE = plan(
     ("aws_s3_bucket_policy", "org", {"policy": ORG_READ}, None),
     ("aws_s3_bucket_policy", "org_paths", {"policy": ORG_PATHS_READ}, None),
     ("aws_route_table", "empty", {"route": []}, {"route": []}),
+    (
+        "aws_route_table",
+        "transit",
+        {"route": [{"cidr_block": "10.1.0.0/16"}]},
+        {"route": [{"transit_gateway_id": True}]},
+    ),
 )
 
 
@@ -195,6 +207,28 @@ class InternetFacing(unittest.TestCase):
         "ECS network unknown until apply": ("aws_ecs_service", {}, {"network_configuration": True}),
         "routes unknown until apply": ("aws_route_table", {}, {"route": True}),
         "route list unknown until apply": ("aws_route_table", {"route": []}, {"route": [{"gateway_id": True}]}),
+        "unknown route next to a known one": (
+            "aws_route_table",
+            {"route": [{"cidr_block": "10.1.0.0/16", "transit_gateway_id": "tgw-1"}]},
+            {"route": [{}, True]},
+        ),
+        "whole route unknown next to a known one": (
+            "aws_route_table",
+            {"route": [{"cidr_block": "10.1.0.0/16", "transit_gateway_id": "tgw-1"}, None]},
+            {"route": [{}, True]},
+        ),
+        "inline route with unknown destination to IGW": (
+            "aws_route_table",
+            {"route": [{"cidr_block": "10.1.0.0/16", "transit_gateway_id": "tgw-1"}, {"gateway_id": "igw-1"}]},
+            {"route": [{}, {"cidr_block": True}]},
+        ),
+        "route with unknown destination to NAT": (
+            "aws_route",
+            {"nat_gateway_id": "nat-1"},
+            {"destination_cidr_block": True},
+        ),
+        "public policy for any service": ("aws_ecr_repository_policy", {"policy": OPEN_SERVICE_PULL}, None),
+        "public policy for any federated principal": ("aws_s3_bucket_policy", {"policy": OPEN_FEDERATED_READ}, None),
         "public ECR policy": ("aws_ecr_repository_policy", {"policy": OPEN_PULL}, None),
         "ECR Public repository": ("aws_ecrpublic_repository", {"repository_name": "x"}, None),
         "S3 website": ("aws_s3_bucket_website_configuration", {}, None),
