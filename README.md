@@ -214,6 +214,9 @@ Branch protection on `main` requires these checks; the command that applies them
   protection with the required checks. The repository documents them; it cannot enforce them.
 - **The permission policy limits where the job deploys, not what.** Anyone who can merge to `main` and approve
   `production` can ship any image that passes the gates.
+- **ECR keeps the ten most recent images.** More than ten builds without a successful deploy would expire the image
+  the service runs, and a rollback or scale-out could not pull it. A production setup tags released digests and
+  excludes them from the lifecycle rule.
 - **Attestations are verified by the pipeline, not by ECS.** Someone with console access could register a task
   definition with an unverified image.
 - **One environment, one account.** A real engagement adds staging in its own account with its own role and subject,

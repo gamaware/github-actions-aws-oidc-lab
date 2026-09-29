@@ -43,7 +43,8 @@ Before each root is applied, the script:
    addresses, a default route to an internet or NAT gateway, and a few more. It also refuses any Route 53 resource,
    a public EKS API endpoint and public S3 or ECR access (an ECR Public repository, an S3 website endpoint, a public
    bucket ACL, a public access block with any setting off, or a bucket or repository policy that allows any
-   principal without a condition);
+   principal unless a condition limits it to an account, organization, principal, source or VPC). A public IP
+   setting or route that stays unknown until apply is refused as well;
 4. applies that saved plan, and only that plan.
 
 The roots are applied in order (network, deploy target, then the GitLab or pipeline root), because the deploy target

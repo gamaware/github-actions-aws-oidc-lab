@@ -43,9 +43,15 @@ build-image:
       alias: docker
   timeout: 20m
   variables:
+    # The dind service listens with TLS on 2376; the client certificates land in
+    # /certs/client once the service has started.
+    DOCKER_HOST: tcp://docker:2376
     DOCKER_TLS_CERTDIR: /certs
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: /certs/client
   script:
-    # buildx refuses TLS settings from the environment; a context carries them.
+    # buildx refuses TLS settings from the environment; a context created from
+    # them carries the endpoint and certificates.
     - docker context create tls-env
     - docker buildx create --use --driver docker-container tls-env
     # No BuildKit provenance or SBOM: they would wrap the manifest in an index,

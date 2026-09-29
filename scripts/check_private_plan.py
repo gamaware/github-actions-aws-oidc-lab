@@ -36,8 +36,24 @@ FORBIDDEN_TYPES = {
 
 PUBLIC_ACLS = {"public-read", "public-read-write", "authenticated-read"}
 
-# Resource policies that could grant access to anyone: an Allow to "*" without a Condition is refused.
+# Resource policies that could grant access to anyone: an Allow to "*" is refused unless a Condition limits the
+# caller to an account, organization, principal, source resource or VPC.
 POLICY_TYPES = {"aws_s3_bucket_policy", "aws_ecr_repository_policy", "aws_ecrpublic_repository_policy"}
+
+# Condition keys that tie a statement to known callers. aws:SecureTransport, aws:SourceIp and similar keys do not:
+# anyone on the internet can meet them.
+RESTRICTING_CONDITION_KEYS = {
+    "aws:principalaccount",
+    "aws:principalarn",
+    "aws:principalorgid",
+    "aws:principalorgpaths",
+    "aws:sourceaccount",
+    "aws:sourcearn",
+    "aws:sourceorgid",
+    "aws:sourceorgpaths",
+    "aws:sourcevpc",
+    "aws:sourcevpce",
+}
 
 PUBLICLY_ACCESSIBLE_TYPES = {
     "aws_db_instance",
@@ -65,15 +81,19 @@ def _world(values: Any) -> bool:
 
 
 def _default_route_via_gateway(route: dict[str, Any], unknown: dict[str, Any]) -> bool:
-    """A default route (0.0.0.0/0 or ::/0) through an internet, NAT or egress-only gateway."""
+    """A default route (0.0.0.0/0 or ::/0) through an internet, NAT or egress-only gateway.
+
+    A destination known only after apply could be a default route, so it counts as one.
+    """
     keys = ("cidr_block", "ipv6_cidr_block", "destination_cidr_block", "destination_ipv6_cidr_block")
-    if not any(route.get(key) in WORLD for key in keys):
+    destination_unknown = any(unknown.get(key) for key in keys)
+    if not destination_unknown and not any(route.get(key) in WORLD for key in keys):
         return False
     return any(route.get(key) or unknown.get(key) for key in ("gateway_id", "nat_gateway_id", "egress_only_gateway_id"))
 
 
 def _allows_anyone(policy: Any) -> bool:
-    """True when a policy document has an Allow statement for any principal ("*") and no Condition."""
+    """True when a policy document has an Allow statement for any principal ("*") that no Condition key limits."""
     if not isinstance(policy, str) or not policy:
         return False
     try:
@@ -85,14 +105,80 @@ def _allows_anyone(policy: Any) -> bool:
         statements = [statements]
     for statement in statements:
         principal = statement.get("Principal")
-        anyone = principal == "*" or (isinstance(principal, dict) and "*" in _as_list(principal.get("AWS")))
-        if statement.get("Effect") == "Allow" and anyone and not statement.get("Condition"):
+        # "*" under any principal type (AWS, Service, Federated, CanonicalUser) counts as anyone.
+        anyone = principal == "*" or (
+            isinstance(principal, dict) and any("*" in _as_list(value) for value in principal.values())
+        )
+        if statement.get("Effect") == "Allow" and anyone and not _limits_callers(statement.get("Condition")):
             return True
     return False
 
 
+def _limits_callers(condition: Any) -> bool:
+    """True when a Condition ties the statement to concrete, known callers.
+
+    Negated, Null and IfExists operators let callers without the key through. A wildcard value ("*" or "?") matches
+    anyone, and "anonymous" is the value aws:PrincipalAccount takes for unsigned requests. ForAllValues is true when
+    the key is absent, so it counts only alongside a Null check that requires the key.
+    """
+    if not isinstance(condition, dict):
+        return False
+    required = _required_keys(condition)
+    for operator, block in condition.items():
+        if not isinstance(operator, str) or not isinstance(block, dict):
+            continue
+        if "Not" in operator or operator == "Null" or operator.endswith("IfExists"):
+            continue
+        for key, value in block.items():
+            name = key.lower() if isinstance(key, str) else ""
+            if name not in RESTRICTING_CONDITION_KEYS or not _concrete(value):
+                continue
+            if operator.startswith("ForAllValues:") and name not in required:
+                continue
+            return True
+    return False
+
+
+def _required_keys(condition: dict[str, Any]) -> set[str]:
+    """Condition keys a Null operator requires to be present ("false" means the key must exist)."""
+    block = condition.get("Null")
+    if not isinstance(block, dict):
+        return set()
+    return {key.lower() for key, value in block.items() if isinstance(key, str) and _is_false(value)}
+
+
+def _is_false(value: Any) -> bool:
+    return all(v is False or (isinstance(v, str) and v.lower() == "false") for v in _as_list(value))
+
+
+def _concrete(value: Any) -> bool:
+    """A non-empty list of literal values, none a wildcard pattern and none "anonymous"."""
+    values = _as_list(value)
+    return bool(values) and all(
+        isinstance(v, str) and v and "*" not in v and "?" not in v and v.lower() != "anonymous" for v in values
+    )
+
+
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else [value]
+
+
+def _route_table_violations(address: str, routes: list[Any], routes_unknown: Any) -> list[str]:
+    """Inline routes: a route known only after apply is refused, even next to known routes."""
+    if routes_unknown is True:
+        return [f"{address}: routes are unknown until apply"]
+    unknown_list = routes_unknown if isinstance(routes_unknown, list) else []
+    found: list[str] = []
+    for i in range(max(len(routes), len(unknown_list))):
+        route = routes[i] if i < len(routes) else None
+        route_unknown = unknown_list[i] if i < len(unknown_list) else {}
+        if route_unknown is True or (route is None and route_unknown):
+            return [f"{address}: routes are unknown until apply"]
+        if not isinstance(route, dict):
+            continue
+        if _default_route_via_gateway(route, route_unknown if isinstance(route_unknown, dict) else {}):
+            found.append(f"{address}: default route to the internet")
+    return found
 
 
 def violations(plan: dict[str, Any]) -> list[str]:
@@ -121,9 +207,15 @@ def violations(plan: dict[str, Any]) -> list[str]:
             if after.get("cidr_ipv4") in WORLD or after.get("cidr_ipv6") in WORLD:
                 found.append(f"{address}: ingress from 0.0.0.0/0 or ::/0 on port {after.get('from_port')}")
         elif rtype == "aws_ecs_service":
-            for net in after.get("network_configuration") or []:
-                if net.get("assign_public_ip"):
+            # A value known only after apply could be true, so it is refused like true.
+            nets_unknown = unknown.get("network_configuration")
+            for i, net in enumerate(after.get("network_configuration") or []):
+                net_unknown = nets_unknown[i] if isinstance(nets_unknown, list) and i < len(nets_unknown) else {}
+                maybe_public = isinstance(net_unknown, dict) and net_unknown.get("assign_public_ip")
+                if net.get("assign_public_ip") or maybe_public:
                     found.append(f"{address}: ECS tasks must run with assign_public_ip = false")
+            if nets_unknown is True:
+                found.append(f"{address}: ECS network configuration is unknown until apply")
         elif rtype == "aws_subnet" and after.get("map_public_ip_on_launch"):
             found.append(f"{address}: subnet maps public IP addresses on launch")
         elif rtype == "aws_instance" and after.get("associate_public_ip_address"):
@@ -133,13 +225,7 @@ def violations(plan: dict[str, Any]) -> list[str]:
         elif rtype == "aws_route" and _default_route_via_gateway(after, unknown):
             found.append(f"{address}: default route to the internet")
         elif rtype in ("aws_route_table", "aws_default_route_table"):
-            routes_unknown = unknown.get("route")
-            for i, route in enumerate(after.get("route") or []):
-                route_unknown = (
-                    routes_unknown[i] if isinstance(routes_unknown, list) and i < len(routes_unknown) else {}
-                )
-                if _default_route_via_gateway(route, route_unknown if isinstance(route_unknown, dict) else {}):
-                    found.append(f"{address}: default route to the internet")
+            found.extend(_route_table_violations(address, after.get("route") or [], unknown.get("route")))
         elif rtype in POLICY_TYPES and _allows_anyone(after.get("policy")):
             found.append(f"{address}: resource policy allows any principal")
         elif rtype in ("aws_s3_bucket_public_access_block", "aws_s3_account_public_access_block"):
