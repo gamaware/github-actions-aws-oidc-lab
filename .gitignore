@@ -28,10 +28,6 @@ __pycache__/
 *.sarif
 sbom.*.json
 .DS_Store
-.claude-flow/
-.claude/proven-config*
-.claude/.proven-config*
-.claude/settings.local.json
 build/
 
 # Vale packages (downloaded by vale sync)
