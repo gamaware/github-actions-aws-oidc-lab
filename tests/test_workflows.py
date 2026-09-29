@@ -100,3 +100,21 @@ def test_deploy_runs_only_on_pushes_to_main():
     wf = load(next(p for p in WORKFLOWS if p.name == "deploy.yml"))
     assert wf["on"] == {"push": {"branches": ["main"]}}
     assert wf["concurrency"]["cancel-in-progress"] is False
+
+
+def test_deploy_attestations_always_name_a_subject():
+    wf = load(next(p for p in WORKFLOWS if p.name == "deploy.yml"))
+    build = wf["jobs"]["build"]
+    assert build["env"]["SUBJECT_NAME"] == "${{ vars.ECR_REPOSITORY_URL || github.repository }}"
+    attest = [s for s in build["steps"] if s.get("uses", "").startswith("actions/attest-")]
+    assert len(attest) == 2
+    for step in attest:
+        assert step["with"]["subject-name"] == "${{ env.SUBJECT_NAME }}"
+        assert step["with"]["subject-digest"] == "${{ steps.build.outputs.digest }}"
+
+
+def test_deploy_job_skips_without_aws_configuration():
+    wf = load(next(p for p in WORKFLOWS if p.name == "deploy.yml"))
+    condition = wf["jobs"]["deploy"]["if"]
+    assert "vars.AWS_ROLE_ARN != ''" in condition
+    assert "vars.ECR_REPOSITORY_URL != ''" in condition
