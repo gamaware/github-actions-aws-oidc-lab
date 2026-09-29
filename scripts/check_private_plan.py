@@ -191,7 +191,11 @@ def _route_table_violations(address: str, routes: list[Any], routes_unknown: Any
 
 
 def _allows_anyone(policy: Any) -> bool:
-    """True when a policy document has an Allow statement for any principal ("*") that no Condition key limits."""
+    """True when a policy document has an Allow statement for any principal ("*") that no Condition key limits.
+
+    A wildcard counts under every principal key (AWS, Service, Federated, CanonicalUser), not only AWS. An Allow with
+    NotPrincipal grants every principal except the ones listed, anonymous callers included, so it counts as well.
+    """
     if not isinstance(policy, str) or not policy:
         return False
     try:
@@ -203,9 +207,10 @@ def _allows_anyone(policy: Any) -> bool:
         statements = [statements]
     for statement in statements:
         principal = statement.get("Principal")
-        # "*" under any principal type (AWS, Service, Federated, CanonicalUser) counts as anyone.
-        anyone = principal == "*" or (
-            isinstance(principal, dict) and any("*" in _as_list(value) for value in principal.values())
+        anyone = (
+            "NotPrincipal" in statement
+            or principal == "*"
+            or (isinstance(principal, dict) and any("*" in _as_list(value) for value in principal.values()))
         )
         if statement.get("Effect") == "Allow" and anyone and not _limits_callers(statement.get("Condition")):
             return True
@@ -293,15 +298,12 @@ def violations(plan: dict[str, Any]) -> list[str]:
             if after.get("cidr_ipv4") in WORLD or after.get("cidr_ipv6") in WORLD:
                 found.append(f"{address}: ingress from 0.0.0.0/0 or ::/0 on port {after.get('from_port')}")
         elif rtype == "aws_ecs_service":
-            # A value known only after apply could be true, so it is refused like true.
-            nets_unknown = unknown.get("network_configuration")
-            for i, net in enumerate(after.get("network_configuration") or []):
-                net_unknown = nets_unknown[i] if isinstance(nets_unknown, list) and i < len(nets_unknown) else {}
-                maybe_public = isinstance(net_unknown, dict) and net_unknown.get("assign_public_ip")
-                if net.get("assign_public_ip") or maybe_public:
-                    found.append(f"{address}: ECS tasks must run with assign_public_ip = false")
-            if nets_unknown is True:
+            # Only an explicit false passes: an absent or unknown value could resolve to true at apply time.
+            if unknown.get("network_configuration") is True:
                 found.append(f"{address}: ECS network configuration is unknown until apply")
+                continue
+            if any(net.get("assign_public_ip") is not False for net in after.get("network_configuration") or [{}]):
+                found.append(f"{address}: ECS tasks must run with assign_public_ip = false")
         elif rtype == "aws_subnet" and after.get("map_public_ip_on_launch"):
             found.append(f"{address}: subnet maps public IP addresses on launch")
         elif rtype == "aws_instance" and after.get("associate_public_ip_address"):
