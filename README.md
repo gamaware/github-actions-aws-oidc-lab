@@ -67,6 +67,8 @@ The work is done when:
 
 ## Architecture
 
+![Animated flow: build once, trust through OIDC, deploy to Fargate by digest](docs/diagrams/architecture-animated.svg)
+
 ![Keyless deploys from CI to AWS: GitHub Actions and GitLab CI trade OIDC tokens for role credentials](docs/diagrams/context.png)
 
 The engineer merges to `main` and approves the production deploy. The CI job asks its own OIDC issuer for a signed
