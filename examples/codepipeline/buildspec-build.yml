@@ -51,9 +51,9 @@ phases:
       - trivy image --image-src docker --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress
         "$ECR_REPOSITORY_URL:$TAG"
       - docker push "$ECR_REPOSITORY_URL:$TAG"
-      - IMAGE_URI="$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ECR_REPOSITORY_URL:$TAG"
+      - export IMAGE_URI="$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ECR_REPOSITORY_URL:$TAG"
         | grep "^$ECR_REPOSITORY_URL@sha256:" | head -n 1)"
-      - IMAGE_DIGEST="${IMAGE_URI#*@}"
+      - export IMAGE_DIGEST="${IMAGE_URI#*@}"
       - '[[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "No digest for the pushed image."; exit 1; }'
       # The ECS deploy action swaps this image into the service's current
       # task definition and registers a new revision.

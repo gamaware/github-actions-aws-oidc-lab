@@ -112,6 +112,15 @@ run "permissions_match_the_github_deploy_role" {
     error_message = "RegisterTaskDefinition must be limited to the lab's family."
   }
 
+  # ForAllValues is true when the key is absent, so the Null condition makes
+  # requiresCompatibilities mandatory for the Fargate-only restriction.
+  assert {
+    condition = one([
+      for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s.Condition.Null["ecs:compute-compatibility"] if s.Sid == "EcsRegisterOneFamily"
+    ]) == "false"
+    error_message = "ecs:RegisterTaskDefinition must require the compute-compatibility key."
+  }
+
   assert {
     condition = one([
       for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s.Resource if s.Sid == "PassOnlyTheExecutionRoleToEcs"
@@ -171,4 +180,34 @@ run "issuer_with_path_is_rejected" {
   }
 
   expect_failures = [var.gitlab_url]
+}
+
+run "wildcard_execution_role_is_rejected" {
+  command = plan
+
+  variables {
+    execution_role_arn = "*"
+  }
+
+  expect_failures = [var.execution_role_arn]
+}
+
+run "wildcard_task_definition_family_is_rejected" {
+  command = plan
+
+  variables {
+    task_definition_family = "*"
+  }
+
+  expect_failures = [var.task_definition_family]
+}
+
+run "wildcard_repository_arn_is_rejected" {
+  command = plan
+
+  variables {
+    ecr_repository_arn = "arn:aws:ecr:us-east-1:111122223333:repository/*"
+  }
+
+  expect_failures = [var.ecr_repository_arn]
 }

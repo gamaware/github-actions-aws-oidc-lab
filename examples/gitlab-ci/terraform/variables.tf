@@ -61,28 +61,54 @@ variable "create_oidc_provider" {
   default     = true
 }
 
-# The deploy target, from `terraform output` in infra/terraform.
+# The deploy target, from `terraform output` in infra/terraform. These values
+# become IAM resources and conditions, so the validations refuse wildcards.
 variable "ecr_repository_arn" {
   description = "ARN of the ECR repository the pipeline pushes to."
   type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws[a-z-]*:ecr:[a-z0-9-]+:[0-9]{12}:repository/[a-z0-9._/-]+$", var.ecr_repository_arn))
+    error_message = "Use the full ECR repository ARN."
+  }
 }
 
 variable "ecs_cluster_arn" {
   description = "ARN of the ECS cluster."
   type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws[a-z-]*:ecs:[a-z0-9-]+:[0-9]{12}:cluster/[A-Za-z0-9_-]+$", var.ecs_cluster_arn))
+    error_message = "Use the full ECS cluster ARN."
+  }
 }
 
 variable "ecs_service_arn" {
   description = "ARN of the ECS service the pipeline updates."
   type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws[a-z-]*:ecs:[a-z0-9-]+:[0-9]{12}:service/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$", var.ecs_service_arn))
+    error_message = "Use the full ECS service ARN in the service/<cluster>/<service> form."
+  }
 }
 
 variable "execution_role_arn" {
   description = "ARN of the task execution role, the only role the pipeline may pass to ECS."
   type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$", var.execution_role_arn))
+    error_message = "Use the full execution role ARN, no wildcards."
+  }
 }
 
 variable "task_definition_family" {
   description = "Task definition family the pipeline registers revisions in."
   type        = string
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_-]{1,255}$", var.task_definition_family))
+    error_message = "Use the exact task definition family: letters, digits, '_' and '-' only, no wildcards."
+  }
 }

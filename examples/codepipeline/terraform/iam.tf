@@ -96,6 +96,7 @@ locals {
           Resource = local.task_definition_family_arn
           Condition = {
             "ForAllValues:StringEquals" = { "ecs:compute-compatibility" = ["FARGATE"] }
+            Null                        = { "ecs:compute-compatibility" = "false" }
             StringEqualsIfExists        = { "ecs:privileged" = "false" }
           }
         },
