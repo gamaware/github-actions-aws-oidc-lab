@@ -90,3 +90,6 @@ Relative to the first draft of the lab:
 
 - The Trivy gate failed on HIGH findings in pip's vendored packages. The runtime image no longer ships pip, which
   the standard-library app never used. The base image digest was already the latest `python:3.13-slim`.
+- The Trivy gate failed on HIGH Debian findings in the base image (CVE-2026-103111 in `libpcre2-8-0`,
+  CVE-2026-84782 in OpenSSL). The `python:3.13-slim` digest now points at the rebuild that ships the patched
+  packages.
