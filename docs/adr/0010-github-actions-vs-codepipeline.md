@@ -60,7 +60,7 @@ When to use each, as advice for a client:
 
 ## Consequences
 
-- The CI/CD offer covers both GitHub-native and AWS-native clients with tested code.
+- The pipeline covers both GitHub-native and AWS-native clients with tested code.
 - Two deploy paths can update the same service. A client picks one per service; running both would let either
   deploy without the other's approval.
 - The CodePipeline path does not attest provenance or an SBOM. Trivy runs on the image before the push, and the
