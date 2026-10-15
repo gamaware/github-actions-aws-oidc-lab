@@ -15,3 +15,4 @@ When reviewing pull requests in this repository:
   assertion in `terraform/tests/codepipeline.tftest.hcl`.
 - No real account IDs, ARNs, IPs, emails or client names. Use placeholders or AWS documentation example IDs.
 - Conventional commit titles; documentation and `CHANGELOG.md` updated with behavior changes.
+- Flag job-marketplace profile links, service offers and sales badges; none are allowed.

@@ -230,8 +230,6 @@ Branch protection on `main` requires these checks; the command that applies them
 
 ## Related work
 
-- [CI/CD pipeline to AWS on Upwork](https://www.upwork.com/freelancers/~014b3520cf9e140103). This lab is the
-  pattern that service delivers on a client's own repository and account.
 - [AWS DevOps portfolio](https://github.com/gamaware/aws-devops-portfolio): the index of every lab and sample
   deliverable.
 
