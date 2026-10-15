@@ -38,7 +38,7 @@ call STS even when it runs on `main`.
 
 ## Consequences
 
-- The multi-tool claim of the CI/CD offer rests on code and tests, not on a sentence.
+- The multi-tool claim of the pipeline rests on code and tests, not on a sentence.
 - Any job added to `main` with `id_tokens` and the `sts.amazonaws.com` audience could assume the role. The pipeline
   test fails if a second job declares `id_tokens`, and GitLab's protected branches limit who can change the file.
 - The subject matches the branch by name. A fork merge request whose source branch is also named `main`, run in
