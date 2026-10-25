@@ -20,7 +20,7 @@ repos:
         args: [--branch, main]
 
   - repo: https://github.com/antonbabenko/pre-commit-terraform
-    rev: 80c8033123f6d6b9ccd1a9458562ea4180742af7  # frozen: v1.109.2
+    rev: 443ffdff1cc1663b701ae73e7459029fe883455a  # frozen: v1.109.3
     hooks:
       - id: terraform_fmt
       - id: terraform_validate
@@ -29,7 +29,7 @@ repos:
         args: [--args=--config=__GIT_WORKING_DIR__/infra/terraform/.tflint.hcl]
 
   - repo: https://github.com/bridgecrewio/checkov
-    rev: 22ba0d2077cd3a09fc1547ae80be9ffe4e471e6c  # frozen: 3.3.27
+    rev: dfeb34b2d52a269bb417b4d4f7854a16bef06629  # frozen: 3.3.30
     hooks:
       - id: checkov
         args: [--quiet, --compact]
@@ -45,7 +45,7 @@ repos:
       - id: actionlint
 
   - repo: https://github.com/woodruffw/zizmor-pre-commit
-    rev: fa412071e4f5d44d44f9e365f4676f9df92456a2  # frozen: v1.30.1
+    rev: c92afdf2c6ca336aaa8f39e2bd8d48f62dbd8e1f  # frozen: v1.31.1
     hooks:
       - id: zizmor
         args: [--offline]
@@ -76,12 +76,12 @@ repos:
       - id: gitleaks
 
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: 916ad0aaa108c64d294101002066f530ea170b10  # frozen: v0.23.3
+    rev: 341e2a331ba578029e66c2e01183e7a6b5ca9ab4  # frozen: v0.24.0
     hooks:
       - id: markdownlint-cli2
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: 44b5042edab9382aba712eed4f9c7bab7a3d6a3e  # frozen: v0.17.0
+    rev: f368fb366ff7f2f808dd324b83a6d32267799e19  # frozen: v0.17.2
     hooks:
       - id: ruff-check
       - id: ruff-format
