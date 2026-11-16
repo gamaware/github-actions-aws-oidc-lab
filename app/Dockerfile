@@ -1,13 +1,18 @@
 # Base image pinned by digest; Dependabot proposes updates.
-FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8080
 
+# Debian security fixes can land before the upstream image is rebuilt, so the
+# installed OS packages are upgraded and the package lists removed afterwards.
 # The service uses only the standard library, so pip is removed: it is not
 # needed at runtime and its vendored packages carry their own CVEs.
-RUN python -m pip uninstall --yes --no-cache-dir pip \
+RUN apt-get update \
+    && apt-get upgrade --yes --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall --yes --no-cache-dir pip \
     && groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
 
