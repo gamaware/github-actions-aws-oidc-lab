@@ -30,9 +30,11 @@ explicitly instead of `--config auto`, so the rules do not depend on detection a
 
 ## Consequences
 
-- Trivy gates only on fixable findings. An unfixed CVE in the base image does not block every merge; a Dependabot
-  digest bump brings the fix, and the weekly run reports new CVEs in an unchanged image. The first version failed
-  on HIGH findings in pip's vendored packages; the runtime image now removes pip, which the app does not use.
+- Trivy gates only on fixable findings. An unfixed CVE in the base image does not block every merge. The image
+  build runs `apt-get upgrade`, so a Debian fix applies on the next build even before upstream rebuilds the base
+  image; a Dependabot digest bump brings the rest, and the weekly run reports new CVEs in an unchanged image. The
+  first version failed on HIGH findings in pip's vendored packages; the runtime image now removes pip, which the app
+  does not use.
 - Every Checkov skip must sit next to the resource with its reason (see the KMS key policy in `infra/terraform/main.tf`).
 - Fork pull requests get a read-only token, so their SARIF upload is skipped by GitHub. The gates still run and
   still block.

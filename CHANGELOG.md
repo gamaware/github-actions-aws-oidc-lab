@@ -93,3 +93,6 @@ Relative to the first draft of the lab:
 - The Trivy gate failed on HIGH Debian findings in the base image (CVE-2026-103111 in `libpcre2-8-0`,
   CVE-2026-84782 in OpenSSL). The `python:3.13-slim` digest now points at the rebuild that ships the patched
   packages.
+- The Trivy gates failed on HIGH Debian findings that the newest `python:3.13-slim` rebuild still shipped
+  (CVE-2026-85091 and CVE-2026-76844 in `zlib1g`, CVE-2026-109518 in `apt`). The digest moves to the latest rebuild
+  and the image build now runs `apt-get upgrade`, so Debian security fixes apply without waiting for upstream.
