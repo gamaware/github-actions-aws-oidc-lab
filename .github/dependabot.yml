@@ -6,6 +6,9 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      github-actions-all:
+        patterns: ["*"]
 
   - package-ecosystem: docker
     directory: /app
@@ -13,6 +16,9 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      docker-all:
+        patterns: ["*"]
 
   - package-ecosystem: pip
     directory: /app
@@ -20,6 +26,9 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      pip-all:
+        patterns: ["*"]
 
   - package-ecosystem: terraform
     directory: /infra/terraform
@@ -27,3 +36,6 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      terraform-all:
+        patterns: ["*"]
